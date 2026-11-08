@@ -1,0 +1,8 @@
+w600 shot:title phase:boot_title
+start w60 a w60 a*400 shot:intro phase:intro_text
+start w60 a*10 start w60 a*10 start w60 a*10 start w60 shot:naming phase:naming
+a*300 shot:battle phase:battle
+a*300 shot:after dump:after phase:after_battle
+a*800 shot:field0 dump:town phase:dialogue
+hold:down:90 hold:left:60 hold:up:60 hold:right:90 hold:down:120 shot:walk phase:walk
+start w30 shot:menu a w30 down a w30 b b b w30 down a w30 shot:menu2 b b b b w30 phase:menu
