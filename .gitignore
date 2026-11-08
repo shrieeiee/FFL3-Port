@@ -6,3 +6,4 @@ third_party/
 *.bmp
 *.mem
 maps_sheet.png
+__pycache__/
