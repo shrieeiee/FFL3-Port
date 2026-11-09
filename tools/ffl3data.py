@@ -46,7 +46,7 @@ class Rom:
         p = self.ptr(3, 0x731c, idx)
         r = [self.b(3, p + i) for i in range(7)]
         return dict(hmask=(r[0] & 0x0f) - 1, wmask=(r[0] >> 4) - 1,
-                    pages=r[1:5], tileattr=r[5], unk=r[6])
+                    pages=r[1:5], blockset=r[5], tileattr=r[5], unk=r[6])
 
     def layout(self, L):                       # 00:0f42
         bank = 8 if L >= 0x10 else 7
@@ -59,7 +59,8 @@ class Rom:
         mt_base = self.ptr(bank, 0x4022, idx)
         wmt = stride // 2                              # metatiles per row
         hmt = count // wmt
-        # expand metatiles -> tile map (each metatile b0=TL b1=BL b2=TR b3=BR)
+        # expand 32px super-blocks -> 16px blocks (b0=TL b1=BL b2=TR b3=BR); this is what
+        # the game keeps at wD000. 'tiles' is the BLOCK grid (name kept for compatibility).
         tiles = [[0] * (wmt * 2) for _ in range(hmt * 2)]
         meta = []
         for i in range(count):
@@ -93,3 +94,43 @@ def tile_pixels(t16):
         lo, hi = t16[y*2], t16[y*2+1]
         px.append([((lo >> (7-x)) & 1) | (((hi >> (7-x)) & 1) << 1) for x in range(8)])
     return px
+
+def obj_vram(rom, spriteset, player_page=0x70):
+    """Rebuild OBJ VRAM $8000-$87FF as the field loader leaves it (07:7f00, 00:0438, 00:04b1)."""
+    v = bytearray(0x800)
+    def cp(bank, src, dst, n):
+        o = rom.off(bank, src); v[dst-0x8000:dst-0x8000+n] = rom.d[o:o+n]
+    # 07:7f00 - fixed sprite tiles
+    dst = 0x8100
+    for bank, src, n in [(4,0x7d00,0x100),(4,0x7c00,0x100),(4,0x7e00,0x200),(3,0x5100,0x100),
+                         (3,0x5800,0x100),(3,0x4e00,0x40),(3,0x5380,0x80),(3,0x5440,0x40)]:
+        cp(bank, src, dst, n); dst += n
+    cp(3, 0x5430, 0x87e0, 0x10)
+    # 00:0438 - sprite set 03:751c[wCA1E]
+    p = rom.ptr(3, 0x751c, spriteset)
+    mask = rom.b(3, p); p += 1
+    for i in range(8):
+        if mask & (0x80 >> i):
+            idx = rom.b(3, p); p += 1
+            if idx < 0x40: cp(4, (0x40 + idx) << 8, 0x8000 + i*0x100, 0x100)
+            else: cp(3, (0x49 + idx - 0x40) << 8, 0x8000 + i*0x100, 0x100)
+    dst = 0x8600
+    while rom.b(3, p) != 0xff:
+        idx = rom.b(3, p) & 0x7f; p += 1
+        cp(3, 0x4900 + idx*0x40, dst, 0x40); dst += 0x40
+    # 00:04b1 - party leader
+    cp(4, player_page << 8, 0x8000, 0x100)
+    return bytes(v)
+
+
+def block_tiles(rom, tileattr, block, layer=0):
+    """16x16 block -> 4 BG tile numbers (TL, BL, TR, BR - column-major, verified against VRAM)
+    via 06:4000[set] (00:0a3a, 01:5ea6)."""
+    b = block & 0x3f
+    if (block & 0x40) and not (layer & 0x40): b = 1      # other-layer blocks drawn as block 1
+    elif not (block & 0x40) and (layer & 0x40): b = 0
+    p = rom.ptr(6, 0x4000, tileattr) + b * 4
+    return [rom.b(6, p + i) for i in range(4)]
+
+def block_attr(rom, tileattr, block):
+    return rom.b(6, rom.ptr(6, 0x5acc, tileattr) + (block & 0x3f))

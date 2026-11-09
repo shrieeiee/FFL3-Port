@@ -1,0 +1,95 @@
+#include "render.h"
+
+namespace ffl3 {
+
+namespace {
+void decode(const uint8_t* t16, std::array<uint8_t, 64>& out) {
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            out[y * 8 + x] = uint8_t(((t16[y * 2] >> (7 - x)) & 1) | (((t16[y * 2 + 1] >> (7 - x)) & 1) << 1));
+}
+int wrap(int v, int n) { return ((v % n) + n) % n; }
+}
+
+void TileCache::build(const Rom& rom, const Field& f) {
+    const auto bgt = loadBgTiles(rom, f.gfx());
+    for (int i = 0; i < 256; i++) decode(bgt[i].data(), bg[i]);
+    for (int i = 0; i < 128; i++) decode(f.objTiles()[i].data(), obj[i]);
+    map = f.mapId();
+}
+
+// Sprite frames in a 16-tile page: +0 front, +4 back, +8 side (faces left), +12 side step.
+// Tiles within a frame are column-major: TL, BL, TR, BR (as in OAM at 01:5cd3).
+static void drawSprite(const TileCache& tc, uint8_t obp, Frame& out, int sx, int sy, int base, bool flipX) {
+    for (int k = 0; k < 4; k++) {
+        const int tx = (k >> 1) ^ (flipX ? 1 : 0), ty = k & 1;
+        const auto& t = tc.obj[(base + k) & 0x7f];
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++) {
+                const uint8_t c = t[y * 8 + (flipX ? 7 - x : x)];
+                if (!c) continue;
+                const int X = sx + tx * 8 + x, Y = sy + ty * 8 + y;
+                if (X < 0 || Y < 0 || X >= out.w || Y >= out.h) continue;
+                out.px[size_t(Y) * out.w + X] = uint8_t((obp >> (c * 2)) & 3);
+            }
+    }
+}
+
+static void frameFor(const Mover& m, int baseTile, int& tile, bool& flip) {
+    tile = baseTile; flip = false;
+    const bool step = m.moveFrames > 0 && ((m.animTick >> 3) & 1);
+    switch (m.facing) {
+    case Dir::Down:  tile = baseTile + 0; flip = step; break;
+    case Dir::Up:    tile = baseTile + 4; flip = step; break;
+    case Dir::Left:  tile = baseTile + (step ? 12 : 8); flip = false; break;
+    case Dir::Right: tile = baseTile + (step ? 12 : 8); flip = true; break;
+    }
+}
+
+void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame& out,
+                 std::vector<uint8_t>* debugTint) {
+    const Mover& p = f.player();
+    const int mapW = f.cols() * 16, mapH = f.rows() * 16;
+    // Camera: the game puts the leader at scroll + $50 and the screen at scroll + (16, 8),
+    // i.e. the leader's body at (72, 64) on a 160x144 screen. Keep that centring for any width.
+    const int pyPix = p.row * 16 + p.subY(), pxPix = p.col * 16 + p.subX();
+    const int camY = pyPix - (out.h / 2 - 8), camX = pxPix - (out.w / 2 - 8);
+    if (debugTint) debugTint->assign(out.px.size(), 0);
+
+    for (int y = 0; y < out.h; y++) {
+        const int my = wrap(camY + y, mapH);
+        const int brow = my >> 4, sub = (my >> 3) & 1, ty = my & 7;
+        for (int x = 0; x < out.w; x++) {
+            const int mx = wrap(camX + x, mapW);
+            const int bcol = mx >> 4;
+            const uint8_t block = f.blockAt(brow, bcol);
+            const auto& bt = f.drawnTiles(block);
+            const uint8_t tile = bt[((mx >> 3) & 1) * 2 + sub];     // TL BL TR BR
+            const uint8_t c = tc.bg[tile][ty * 8 + (mx & 7)];
+            out.px[size_t(y) * out.w + x] = uint8_t((o.bgp >> (c * 2)) & 3);
+            if (debugTint) {
+                const uint8_t a = f.attrAt(brow, bcol);
+                (*debugTint)[size_t(y) * out.w + x] =
+                    (a & 0xc0) == 0xc0 ? 3 : f.passable(brow, bcol) ? 1 : 2;
+            }
+        }
+    }
+    auto screenPos = [&](const Mover& m, int& sx, int& sy) {
+        int dy = m.row * 16 + m.subY() - camY, dx = m.col * 16 + m.subX() - camX;
+        dy = wrap(dy + mapH / 2, mapH) - mapH / 2;   // nearest wrapped copy
+        dx = wrap(dx + mapW / 2, mapW) - mapW / 2;
+        sx = dx; sy = dy;
+    };
+    for (const Npc& n : f.npcs()) {
+        int sx, sy, tile; bool flip;
+        screenPos(n.m, sx, sy);
+        frameFor(n.m, n.spriteTile, tile, flip);
+        drawSprite(tc, o.obp, out, sx, sy, tile, flip);
+    }
+    int sx, sy, tile; bool flip;
+    screenPos(p, sx, sy);
+    frameFor(p, 0, tile, flip);
+    drawSprite(tc, o.obp, out, sx, sy, tile, flip);
+}
+
+} // namespace ffl3

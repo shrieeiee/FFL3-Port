@@ -24,7 +24,7 @@ if(NOT SDL2_FOUND)
     endif()
 endif()
 
-add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp)
+add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp)
 target_include_directories(ffl3core PUBLIC src)
 
 add_executable(ffl3 WIN32 src/main.cpp)

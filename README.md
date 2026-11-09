@@ -7,14 +7,19 @@ No game data lives in this repo. The port reads graphics, maps, text and so on s
 
 ## Status
 
-**Milestone 1 – map viewer** ✅
-- ROM loading + validation (title `SAGA3`, global checksum)
-- Original bitmask decompressor (00:3d76)
-- Map headers, gfx sets, layouts, metatiles, BG tilesets
-- All 192 maps load; tilemaps are verified tile-for-tile against the real game's RAM
-- Viewer: scroll, switch maps, zoom, palettes, metatile grid, screenshots
+**Milestone 1 – maps** ✅
+- ROM loading + validation (title `SAGA3`, global checksum), original bitmask decompressor
+- Three-level map format (super-blocks → blocks → tiles), all 192 maps
 
-Next up: sprites and NPCs, collision/tile attributes, exits, walking the party around.
+**Milestone 2 – walking the field** ✅
+- Rendering verified against the real game: 99.6% pixel match with an emulator frame
+- Party leader + NPCs with the game's own sprite sets (OBJ VRAM rebuilt tile-for-tile)
+- Collision from block attributes, inside/outside layers (roofs hide interiors)
+- Event blocks: exits, entering buildings and coming back out (return stack)
+- Exit landing positions verified against the real game
+
+Not yet: NPC movement and talking, event flags, text boxes, menus, battles, music,
+vehicles (the Talon), and overworld collision is inferred rather than emulator-checked.
 
 ## Building
 
@@ -34,22 +39,25 @@ Put your ROM next to the exe as `saga3.gb` (or pass the path / drag it onto the 
 It must be **Final Fantasy Legend III (U)**, MD5 `db156bc96b528996ce1bf771195171af`.
 
 ```
-ffl3 [rom.gb] [--map HEX] [--scale N] [--shot out.bmp] [--dump-tiles out.bin]
+ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
+     [--walk UDLR...] [--shot out.bmp] [--debug] [--dump-blocks out.bin]   (headless/testing)
 ```
 
 | Key | Action |
 |---|---|
-| Arrows / WASD | scroll |
+| Arrows / WASD | walk |
+| Tab | GB 160×144 ↔ widescreen 256×144 |
+| F1 | collision overlay (green walk, red solid, blue event) |
+| F2 | no-clip |
 | PgUp / PgDn, `[` / `]` | previous / next map |
-| `+` / `-` | zoom |
 | P | cycle palette (grey / DMG / Pocket) |
-| G | metatile grid |
-| F12 | save the whole map as BMP |
+| F12 | screenshot (BMP) |
 
 ## Tests
 
-`tests/test_maps.sh saga3.gb` checks the C++ loader against the Python reference
-(`tools/ffl3data.py`) for every map.
+- `tests/test_maps.sh saga3.gb` – C++ map loader vs the Python reference, all 192 maps
+- `tests/test_field.sh saga3.gb` – collision/exit behaviour, expected values taken from the
+  real game running in the coverage emulator
 
 ## Reverse-engineering tools (`tools/`)
 
@@ -59,6 +67,8 @@ ffl3 [rom.gb] [--map HEX] [--scale N] [--shot out.bmp] [--dump-tiles out.bin]
   Build: `gcc -O2 -o cov cov.c` (needs `peanut_gb.h` from github.com/deltabeard/Peanut-GB)
 - `analyze.py`, `readers.py` – map coverage/data reads onto the disassembly's labels
 - `playthrough.txt` – input script for `cov` (title → intro → battle → town)
+- `route.py`, `drive.py` – plan a route with the port's rules and drive the real game along it
+  in `cov`, one step at a time, to get ground truth
 
 See `docs/RE_NOTES.md` for engine structure and addresses. It builds on
 [daid/FFL3-Disassembly](https://github.com/daid/FFL3-Disassembly) and the tables in

@@ -1,10 +1,11 @@
-// FFL3 / SaGa 3 PC port - milestone 1: native map viewer.
+// FFL3 / SaGa 3 PC port - milestone 2: walk the field.
 //
-//   ffl3 [rom.gb] [--map HEX] [--scale N] [--shot out.bmp] [--dump-tiles out.bin]
+//   ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--walk UDLR...] [--shot out.bmp]
+//                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N]
 //
-// Keys: arrows/WASD scroll, PgUp/PgDn ([ / ]) previous/next map, +/- zoom,
-//       P palette, G metatile grid, F12 screenshot, Esc quit.
-#include "mapdata.h"
+// Keys: arrows/WASD walk, F1 collision overlay, F2 no-clip, Tab wide/GB view,
+//       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
+#include "render.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cstdio>
@@ -23,38 +24,29 @@ const Palette kPalettes[] = {
 };
 constexpr int kNumPalettes = int(sizeof(kPalettes) / sizeof(kPalettes[0]));
 
-struct LoadedMap {
-    int id = -1;
-    MapHeader hdr{};
-    GfxSet gfx{};
-    Layout layout;
-    std::vector<uint32_t> pixels;   // ARGB, (w*16) x (h*16)
-    int pw = 0, ph = 0;
-};
-
-bool buildMap(const Rom& rom, int id, const Palette& pal, LoadedMap& m) {
-    m = LoadedMap{};
-    m.id = id;
-    m.hdr = loadMapHeader(rom, id);
-    m.gfx = loadGfxSet(rom, m.hdr.gfxset);
-    m.layout = loadLayout(rom, m.hdr.layout);
-    if (!m.layout.valid) return false;
-    const auto tiles = loadBgTiles(rom, m.gfx);
-    const int tw = m.layout.w * 2, th = m.layout.h * 2;
-    m.pw = tw * 8; m.ph = th * 8;
-    m.pixels.assign(size_t(m.pw) * m.ph, 0);
-    for (int ty = 0; ty < th; ty++)
-        for (int tx = 0; tx < tw; tx++) {
-            const auto& t = tiles[m.layout.tiles[ty * tw + tx]];
-            for (int y = 0; y < 8; y++) {
-                const uint8_t lo = t[y * 2], hi = t[y * 2 + 1];
-                for (int x = 0; x < 8; x++) {
-                    const int v = ((lo >> (7 - x)) & 1) | (((hi >> (7 - x)) & 1) << 1);
-                    m.pixels[size_t(ty * 8 + y) * m.pw + tx * 8 + x] = pal.c[v];
-                }
-            }
+void toArgb(const Frame& f, const Palette& pal, const std::vector<uint8_t>* tint, std::vector<uint32_t>& out) {
+    out.resize(f.px.size());
+    static const uint32_t kTint[] = {0, 0x0000C000, 0x00E00000, 0x000040FF};
+    for (size_t i = 0; i < f.px.size(); i++) {
+        uint32_t c = pal.c[f.px[i]];
+        if (tint && (*tint)[i]) {
+            const uint32_t t = kTint[(*tint)[i]];
+            const uint32_t r = ((c >> 16) & 255) / 2 + ((t >> 16) & 255) / 2;
+            const uint32_t g = ((c >> 8) & 255) / 2 + ((t >> 8) & 255) / 2;
+            const uint32_t b = (c & 255) / 2 + (t & 255) / 2;
+            c = 0xFF000000 | (r << 16) | (g << 8) | b;
         }
-    return true;
+        out[i] = c;
+    }
+}
+
+bool saveBmp(const std::vector<uint32_t>& px, int w, int h, const char* path) {
+    SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(const_cast<uint32_t*>(px.data()), w, h, 32, w * 4,
+                                                        SDL_PIXELFORMAT_ARGB8888);
+    if (!s) return false;
+    const bool ok = SDL_SaveBMP(s, path) == 0;
+    SDL_FreeSurface(s);
+    return ok;
 }
 
 int nextValid(const Rom& rom, int from, int dir) {
@@ -65,26 +57,33 @@ int nextValid(const Rom& rom, int from, int dir) {
     return from;
 }
 
-bool saveBmp(const LoadedMap& m, const char* path) {
-    SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(
-        const_cast<uint32_t*>(m.pixels.data()), m.pw, m.ph, 32, m.pw * 4, SDL_PIXELFORMAT_ARGB8888);
-    if (!s) return false;
-    const bool ok = SDL_SaveBMP(s, path) == 0;
-    SDL_FreeSurface(s);
-    return ok;
+int dirFromChar(char c) {
+    switch (c) {
+    case 'D': case 'd': return 0;
+    case 'U': case 'u': return 1;
+    case 'L': case 'l': return 2;
+    case 'R': case 'r': return 3;
+    default: return -1;
+    }
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string romPath = "saga3.gb", shot, dumpTiles;
-    int mapId = 0x0b, scale = 3;
+    std::string romPath = "saga3.gb", shot, dumpTiles, walk;
+    int mapId = 0x02, scale = 5, startRow = -1, startCol = -1;
+    bool wide = false, debug = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--map" && i + 1 < argc) mapId = int(std::strtol(argv[++i], nullptr, 16));
-        else if (a == "--scale" && i + 1 < argc) scale = std::atoi(argv[++i]);
+        else if (a == "--pos" && i + 1 < argc) std::sscanf(argv[++i], "%d,%d", &startRow, &startCol);
+        else if (a == "--walk" && i + 1 < argc) walk = argv[++i];
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
-        else if (a == "--dump-tiles" && i + 1 < argc) dumpTiles = argv[++i];
+        else if (a == "--dump-blocks" && i + 1 < argc) dumpTiles = argv[++i];
+        else if (a == "--scale" && i + 1 < argc) scale = std::max(1, std::atoi(argv[++i]));
+        else if (a == "--wide") wide = true;
+        else if (a == "--debug") debug = true;
+        else if (a.size() > 2 && a[0] == '-' && a[1] == '-') { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
         else romPath = a;
     }
 
@@ -98,107 +97,120 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    Field field(rom);
+    if (!field.enterMap(mapId, startRow, startCol)) field.enterMap(nextValid(rom, mapId, 1));
+    TileCache tiles;
+    tiles.build(rom, field);
+    RenderOpts opts;
+    Frame frame;
+    frame.resize(wide ? 256 : 160, 144);
     int pal = 0;
-    LoadedMap map;
-    if (!buildMap(rom, mapId, kPalettes[pal], map)) {
-        mapId = nextValid(rom, mapId, 1);
-        buildMap(rom, mapId, kPalettes[pal], map);
-    }
+    std::vector<uint32_t> argb;
+    std::vector<uint8_t> tint;
+    auto refreshTiles = [&] { if (tiles.map != field.mapId()) tiles.build(rom, field); };
 
-    // Headless modes (used by tests / tooling).
-    if (!dumpTiles.empty() || !shot.empty()) {
+    // ---- headless: tests / tooling ----------------------------------------------------
+    if (!dumpTiles.empty() || !shot.empty() || !walk.empty()) {
         if (!dumpTiles.empty()) {
             FILE* f = std::fopen(dumpTiles.c_str(), "wb");
             if (!f) return 1;
-            std::fwrite(map.layout.tiles.data(), 1, map.layout.tiles.size(), f);
+            std::fwrite(field.layout().blocks.data(), 1, field.layout().blocks.size(), f);
             std::fclose(f);
         }
-        if (!shot.empty() && !saveBmp(map, shot.c_str())) return 1;
-        std::printf("map %02x layout %02x gfx %02x  %dx%d metatiles\n", map.id, map.hdr.layout,
-                    map.hdr.gfxset, map.layout.w, map.layout.h);
+        for (char c : walk) {
+            const int d = dirFromChar(c);
+            if (d < 0) continue;
+            field.tick(d);
+            for (int i = 0; i < 16 && field.player().moveFrames; i++) field.tick(-1);
+            refreshTiles();
+            if (field.lastEvent().rfind("exit", 0) == 0 || field.lastEvent().rfind("event", 0) == 0)
+                std::printf("  step %c: %s\n", c, field.lastEvent().c_str());
+        }
+        if (!shot.empty()) {
+            renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
+            toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
+            if (!saveBmp(argb, frame.w, frame.h, shot.c_str())) return 1;
+        }
+        std::printf("map %02X layout %02X gfx %02X sprites %02X  %dx%d  player %d,%d  npcs %zu  [%s]\n",
+                    field.mapId(), field.header().layout, field.header().gfxset, field.header().unk1e,
+                    field.layout().w, field.layout().h, field.player().row, field.player().col,
+                    field.npcs().size(), field.lastEvent().c_str());
         return 0;
     }
 
+    // ---- interactive ------------------------------------------------------------------
     if (SDL_Init(SDL_INIT_VIDEO) != 0) { std::fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     SDL_Window* win = SDL_CreateWindow("FFL3", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                       160 * 5, 144 * 5, SDL_WINDOW_RESIZABLE);
+                                       frame.w * scale, frame.h * scale, SDL_WINDOW_RESIZABLE);
     SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     SDL_Texture* tex = nullptr;
-    auto upload = [&] {
-        if (tex) SDL_DestroyTexture(tex);
-        tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, map.pw, map.ph);
-        SDL_UpdateTexture(tex, nullptr, map.pixels.data(), map.pw * 4);
-        char title[160];
-        std::snprintf(title, sizeof title,
-                      "FFL3 map viewer - map %02X  layout %02X  gfx %02X  hook %02X  music %02X  %dx%d  [%s]",
-                      map.id, map.hdr.layout, map.hdr.gfxset, map.hdr.hook, map.hdr.music,
-                      map.layout.w, map.layout.h, kPalettes[pal].name);
-        SDL_SetWindowTitle(win, title);
-    };
-    upload();
-
-    float camX = 0, camY = 0;
-    bool grid = false, running = true;
-    int shotN = 0;
+    int texW = 0, shotN = 0;
+    std::string lastTitle;
+    bool running = true;
     Uint64 last = SDL_GetPerformanceCounter();
+    double acc = 0;
+
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
-            if (e.type == SDL_KEYDOWN) {
-                switch (e.key.keysym.sym) {
-                case SDLK_ESCAPE: running = false; break;
-                case SDLK_PAGEDOWN: case SDLK_RIGHTBRACKET:
-                    buildMap(rom, nextValid(rom, map.id, 1), kPalettes[pal], map); camX = camY = 0; upload(); break;
-                case SDLK_PAGEUP: case SDLK_LEFTBRACKET:
-                    buildMap(rom, nextValid(rom, map.id, -1), kPalettes[pal], map); camX = camY = 0; upload(); break;
-                case SDLK_EQUALS: case SDLK_KP_PLUS: if (scale < 8) scale++; break;
-                case SDLK_MINUS: case SDLK_KP_MINUS: if (scale > 1) scale--; break;
-                case SDLK_p: pal = (pal + 1) % kNumPalettes; buildMap(rom, map.id, kPalettes[pal], map); upload(); break;
-                case SDLK_g: grid = !grid; break;
-                case SDLK_F12: {
-                    char name[64]; std::snprintf(name, sizeof name, "map_%02X_%d.bmp", map.id, shotN++);
-                    saveBmp(map, name); break;
-                }
-                default: break;
-                }
+            if (e.type != SDL_KEYDOWN) continue;
+            switch (e.key.keysym.sym) {
+            case SDLK_ESCAPE: running = false; break;
+            case SDLK_PAGEDOWN: case SDLK_RIGHTBRACKET: field.enterMap(nextValid(rom, field.mapId(), 1)); break;
+            case SDLK_PAGEUP: case SDLK_LEFTBRACKET: field.enterMap(nextValid(rom, field.mapId(), -1)); break;
+            case SDLK_F1: debug = !debug; break;
+            case SDLK_F2: field.noClip = !field.noClip; break;
+            case SDLK_TAB: wide = !wide; frame.resize(wide ? 256 : 160, 144); break;
+            case SDLK_p: pal = (pal + 1) % kNumPalettes; break;
+            case SDLK_F12: {
+                char name[64];
+                std::snprintf(name, sizeof name, "ffl3_%02X_%d.bmp", field.mapId(), shotN++);
+                saveBmp(argb, frame.w, frame.h, name);
+                break;
+            }
+            default: break;
             }
         }
+        // Fixed 60 Hz game logic, like the GB.
         const Uint64 now = SDL_GetPerformanceCounter();
-        const float dt = float(now - last) / float(SDL_GetPerformanceFrequency());
+        acc += double(now - last) / double(SDL_GetPerformanceFrequency());
         last = now;
-        const Uint8* k = SDL_GetKeyboardState(nullptr);
-        const float speed = 160.0f * dt;
-        if (k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A]) camX -= speed;
-        if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) camX += speed;
-        if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) camY -= speed;
-        if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) camY += speed;
-
-        int ww, wh;
-        SDL_GetRendererOutputSize(ren, &ww, &wh);
-        const float viewW = float(ww) / scale, viewH = float(wh) / scale;
-        if (camX > map.pw - viewW) camX = map.pw - viewW;
-        if (camY > map.ph - viewH) camY = map.ph - viewH;
-        if (camX < 0) camX = 0;
-        if (camY < 0) camY = 0;
-
-        SDL_SetRenderDrawColor(ren, 16, 16, 16, 255);
-        SDL_RenderClear(ren);
-        const int ix = int(camX), iy = int(camY);
-        SDL_Rect src{ix, iy, std::min(map.pw - ix, int(viewW) + 1), std::min(map.ph - iy, int(viewH) + 1)};
-        SDL_Rect dst{0, 0, src.w * scale, src.h * scale};
-        SDL_RenderCopy(ren, tex, &src, &dst);
-        if (grid) {
-            SDL_SetRenderDrawColor(ren, 255, 0, 128, 90);
-            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-            for (int x = (16 - ix % 16) % 16; x < src.w; x += 16)
-                SDL_RenderDrawLine(ren, x * scale, 0, x * scale, dst.h);
-            for (int y = (16 - iy % 16) % 16; y < src.h; y += 16)
-                SDL_RenderDrawLine(ren, 0, y * scale, dst.w, y * scale);
+        if (acc > 0.25) acc = 0.25;
+        while (acc >= 1.0 / 60.0) {
+            acc -= 1.0 / 60.0;
+            const Uint8* k = SDL_GetKeyboardState(nullptr);
+            int d = -1;
+            if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = 0;
+            else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = 1;
+            else if (k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A]) d = 2;
+            else if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) d = 3;
+            field.tick(d);
         }
+        refreshTiles();
+        renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
+        toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
+        if (!tex || texW != frame.w) {
+            if (tex) SDL_DestroyTexture(tex);
+            tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, frame.w, frame.h);
+            texW = frame.w;
+            SDL_RenderSetLogicalSize(ren, frame.w, frame.h);
+            SDL_RenderSetIntegerScale(ren, SDL_TRUE);
+        }
+        SDL_UpdateTexture(tex, nullptr, argb.data(), frame.w * 4);
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+        SDL_RenderCopy(ren, tex, nullptr, nullptr);
         SDL_RenderPresent(ren);
+
+        char title[200];
+        std::snprintf(title, sizeof title, "FFL3 - map %02X (%d,%d)%s%s - %s", field.mapId(),
+                      field.player().row, field.player().col, field.noClip ? " [noclip]" : "",
+                      debug ? " [collision]" : "", field.lastEvent().c_str());
+        if (lastTitle != title) { SDL_SetWindowTitle(win, title); lastTitle = title; }
     }
-    SDL_DestroyTexture(tex);
+    if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
