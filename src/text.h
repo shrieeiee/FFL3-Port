@@ -37,6 +37,8 @@ public:
     // Start a text at bank:addr. Opens the window.
     void open(int bank, uint16_t addr);
     bool active() const { return active_; }
+    // Abandon the running text (game over mid-script).
+    void close() { stack_.clear(); active_ = false; state_ = State::Idle; }
     // One 60 Hz frame. a/b/up/down = button states this frame (pressed = edge).
     void tick(bool aPressed, bool aHeld, bool upPressed, bool downPressed);
 

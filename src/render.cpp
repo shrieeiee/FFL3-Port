@@ -138,4 +138,64 @@ void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, 
     }
 }
 
+// ---- battle --------------------------------------------------------------------------------
+
+void BattleGfx::build(const Rom& rom, const Battle& b) {
+    for (int g = 0; g < 3; g++) monster[size_t(g)] = b.monsters()[size_t(g)].tiles;
+    decodeTile(rom.raw(3, 0x5430), cursor);
+    decodeTile(rom.raw(3, 0x57b0), bracket);
+    member.clear();
+    for (int m = 0; m < 5; m++) {
+        std::array<Tile, 4> t;
+        const int page = b.memberSprite(m);
+        for (int k = 0; k < 4; k++) decodeTile(rom.raw(4, uint16_t(page << 8 | k * 16)), t[size_t(k)]);
+        member.push_back(t);
+    }
+}
+
+static void putTile(Frame& out, const Tile& t, uint8_t pal, int sx, int sy, bool obj, bool fx = false, bool fy = false) {
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++) {
+            const uint8_t c = t[size_t((fy ? 7 - y : y) * 8 + (fx ? 7 - x : x))];
+            if (obj && !c) continue;
+            const int X = sx + x, Y = sy + y;
+            if (X < 0 || Y < 0 || X >= out.w || Y >= out.h) continue;
+            out.px[size_t(Y) * out.w + X] = uint8_t((pal >> (c * 2)) & 3);
+        }
+}
+
+void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out) {
+    const int x0 = (out.w - 160) / 2;
+    const BattleView v = b.view();
+    Tile blank;
+    for (size_t i = 0; i < 64; i++) blank[i] = tc.bg[0xff][i];
+    for (int ty = 0; ty < (out.h + 7) / 8; ty++)
+        for (int tx = -1; tx <= out.w / 8; tx++) putTile(out, blank, o.bgp, x0 + tx * 8, ty * 8, false);
+    for (int s : v.visibleSlots) {
+        const EnemySlot& e = b.layout().slots[size_t(s)];
+        const Monster& m = b.monsters()[size_t(e.group)];
+        for (int r = 0; r < m.picH; r++)
+            for (int c = 0; c < m.picW; c++) {
+                const int ti = m.cell[size_t(r * m.picW + c)];
+                if (ti >= 0) putTile(out, g.monster[size_t(e.group)][size_t(ti)], o.bgp, x0 + (e.col + c) * 8, (e.row + r) * 8, false);
+            }
+    }
+    // OBJs that sit under the window line (the party row during messages) go first.
+    auto drawObj = [&](const BattleObj& ob) {
+        if (ob.member >= 0) {
+            const auto& t = g.member[size_t(ob.member)];
+            for (int k = 0; k < 4; k++) putTile(out, t[size_t(k)], o.obp, x0 + ob.x + (k >> 1) * 8, ob.y + (k & 1) * 8, true);
+        } else {
+            putTile(out, ob.tile == Battle::kCursor ? g.cursor : g.bracket, o.obp, x0 + ob.x, ob.y, true, ob.flipX, ob.flipY);
+        }
+    };
+    for (int y = v.wy; y < out.h; y += 8)
+        for (int c = 0; c < 20; c++) {
+            const int row = (y - v.wy) / 8;
+            if (row >= 10) break;
+            putTile(out, tc.bg[v.win[size_t(row * 20 + c)]], o.bgp, x0 + c * 8, y, false);
+        }
+    for (const BattleObj& ob : v.objs) drawObj(ob);
+}
+
 } // namespace ffl3

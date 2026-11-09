@@ -1,13 +1,15 @@
-// FFL3 / SaGa 3 PC port - milestone 3: walk the field and talk.
+// FFL3 / SaGa 3 PC port - milestone 5: walk, talk, events and battles.
 //
 //   ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--walk UDLR...] [--shot out.bmp]
 //                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N]
 //
-// Keys: arrows/WASD walk, Z/Space/Enter talk + advance text, F1 collision overlay, F2 no-clip, Tab wide/GB view,
+// Keys: arrows/WASD walk, Z/Space/Enter = A, X/Backspace = B, F1 collision overlay, F2 no-clip,
+//       F3 random battles on/off, F4 start a random battle here, Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "render.h"
 #include <SDL.h>
 #include <algorithm>
+#include <memory>
 #include <iterator>
 #include <cstdio>
 #include <cstdlib>
@@ -94,7 +96,8 @@ int dirFromChar(char c) {
 
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk;
-    int textId = -1, runTextId = -1;
+    int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
+    std::string keys, dumpView;
     int mapId = -1, scale = 5, startRow = -1, startCol = -1;
     bool wide = false, debug = false, showSlots = false;
     for (int i = 1; i < argc; i++) {
@@ -105,6 +108,10 @@ int main(int argc, char** argv) {
         else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-text" && i + 1 < argc) runTextId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
+        else if (a == "--battle" && i + 1 < argc) battleArg = int(std::strtol(argv[++i], nullptr, 16));
+        else if (a == "--keys" && i + 1 < argc) keys = argv[++i];
+        else if (a == "--dump-view" && i + 1 < argc) dumpView = argv[++i];
+        else if (a == "--shot-at" && i + 1 < argc) shotAt = std::atoi(argv[++i]);
         else if (a == "--dump-blocks" && i + 1 < argc) dumpTiles = argv[++i];
         else if (a == "--scale" && i + 1 < argc) scale = std::max(1, std::atoi(argv[++i]));
         else if (a == "--wide") wide = true;
@@ -138,9 +145,31 @@ int main(int argc, char** argv) {
     text.onEvent = [&](int cmd, int param) { field.runEventCommand(cmd, param); };
     text.isBusy = [&] { return field.busy(); };
     field.openText = [&](int bank, uint16_t addr) { text.open(bank, addr); };
-    field.startBattle = [&](int formation) {
-        char b[64]; std::snprintf(b, sizeof b, "BATTLE: formation %02X (battles not implemented yet)", formation);
+    // Party: records 0-3 + guest (record 4, Myron) as at the start of the game.
+    std::vector<CharRecord> party;
+    auto newParty = [&] { party.clear(); for (int i = 0; i < 5; i++) party.push_back(loadCharacter(rom, i)); };
+    newParty();
+    std::unique_ptr<Battle> battle;
+    BattleGfx bgfx;
+    uint32_t battleSeed = 1;
+    field.startBattle = [&](int hffca) {
+        battle = std::make_unique<Battle>(rom, party, hffca, battleSeed++);
+        bgfx.build(rom, *battle);
+        char b[64]; std::snprintf(b, sizeof b, "battle: formation %02X%s", hffca & 0x7f, hffca & 0x80 ? " (fixed)" : "");
         field.setLastEvent(b);
+    };
+    // After a battle: back to the field, or (all down) back to the start like a game over.
+    auto finishBattle = [&] {
+        const Battle::Result r = battle->result();
+        battle.reset();
+        if (r == Battle::Result::Lost) {
+            newParty();
+            text.close();
+            field.enterMap(0x0b, 26, 7, Dir::Up);
+            field.setLastEvent("party defeated - back to the start");
+        } else {
+            field.setLastEvent(r == Battle::Result::Won ? "battle won" : "ran away");
+        }
     };
     field.giveItem = [&](int item) {
         char b[64]; std::snprintf(b, sizeof b, "got item %02X", item);
@@ -162,6 +191,91 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> argb;
     std::vector<uint8_t> tint;
     auto refreshTiles = [&] { if (tiles.map != field.mapId()) tiles.build(rom, field); };
+
+    // ---- headless: a battle. --battle HH (hFFCA: formation | $80 fixed counts), --keys script:
+    //   A B U D L R = press (then 4 frames), W = 30 frames, * = mash A until the battle ends.
+    //   --shot out.bmp saves the screen when the script ends (or at frame --shot-at N).
+    if (battleArg >= 0) {
+        field.startBattle(battleArg);
+        int frameNo = 0;
+        bool shotDone = false;
+        auto snap = [&] {
+            renderBattle(*battle, bgfx, tiles, opts, frame);
+            toArgb(frame, kPalettes[pal], nullptr, argb);
+            saveBmp(argb, frame.w, frame.h, shot.c_str());
+            shotDone = true;
+        };
+        auto run = [&](BattleInput in) {
+            if (!battle || battle->finished()) return;
+            battle->tick(in);
+            if (++frameNo == shotAt && !shot.empty()) snap();
+        };
+        const Battle& B = *battle;
+        std::printf("formation %02X: ", B.formation().index);
+        for (int g = 0; g < 3; g++) {
+            if (B.formation().ids[g] == 0xff) continue;
+            const Monster& m = B.monsters()[size_t(g)];
+            std::printf("%s%02X x%d (HP %d, class %d %dx%d)", g ? ", " : "", m.id, B.layout().count[g], m.hp,
+                        m.sizeClass, m.picW, m.picH);
+        }
+        std::printf("\nslots:");
+        for (const EnemySlot& e : B.layout().slots) std::printf(" g%d@%d,%d", e.group, e.col, e.row);
+        std::printf("\n");
+        for (char c : keys) {
+            BattleInput in;
+            switch (c) {
+            case 'A': in.a = in.aHeld = true; break;
+            case 'B': in.b = true; break;
+            case 'U': in.up = true; break;
+            case 'D': in.down = true; break;
+            case 'L': in.left = true; break;
+            case 'R': in.right = true; break;
+            case 'W': for (int i = 0; i < 30; i++) run({}); continue;
+            case '*':
+                for (int i = 0; i < 60 * 600 && battle && !battle->finished(); i++) {
+                    BattleInput m; m.a = m.aHeld = (i % 8) == 0; run(m);
+                }
+                continue;
+            default: continue;
+            }
+            run(in);
+            for (int i = 0; i < 4; i++) run({});
+        }
+        if (!shot.empty() && !shotDone) snap();
+        if (!dumpView.empty()) {                  // WY, 20x10 window tiles, then each group's tiles
+            FILE* f = std::fopen(dumpView.c_str(), "wb");
+            if (!f) return 1;
+            const BattleView v = B.view();
+            std::fputc(v.wy, f);
+            std::fwrite(v.win.data(), 1, v.win.size(), f);
+            for (int g = 0; g < 3; g++) {
+                const auto& t = B.monsters()[size_t(g)].tiles;
+                std::fputc(int(t.size()), f);
+                for (const Tile& x : t) std::fwrite(x.data(), 1, 64, f);
+            }
+            std::fclose(f);
+        }
+        for (const std::string& l : B.log) {
+            std::string a;
+            for (unsigned char t : l) {
+                if (t >= 0xba && t <= 0xd3) a += char('A' + t - 0xba);
+                else if (t >= 0xd4 && t <= 0xed) a += char('a' + t - 0xd4);
+                else if (t >= 0xb0 && t <= 0xb9) a += char('0' + t - 0xb0);
+                else if (t == 0xff) a += ' ';
+                else if (t == 0xaf) a += '.';
+                else if (t == 0xf3) a += '!';
+                else if (t == 0xf2) a += '-';
+                else if (t == 0xad) a += '\'';
+                else a += '#';
+            }
+            std::printf("| %s\n", a.c_str());
+        }
+        const char* res[] = {"none", "won", "lost", "ran"};
+        std::printf("result: %s, frames %d, party HP:", res[int(B.result())], frameNo);
+        if (B.finished()) for (const CharRecord& c : party) std::printf(" %d", c.hp());
+        std::printf("\n");
+        return 0;
+    }
 
     // ---- headless: play NPC text `textId`, print the window at every wait -----------------
     if (textId >= 0) {
@@ -236,8 +350,9 @@ int main(int argc, char** argv) {
             field.tick(d);
             for (int i = 0; i < 16 && field.player().moveFrames; i++) field.tick(-1);
             refreshTiles();
-            if (field.lastEvent().rfind("exit", 0) == 0 || field.lastEvent().rfind("event", 0) == 0)
-                std::printf("  step %c: %s\n", c, field.lastEvent().c_str());
+            if (field.lastEvent().rfind("exit", 0) == 0 || field.lastEvent().rfind("event", 0) == 0 ||
+                field.lastEvent().rfind("battle", 0) == 0)
+                std::printf("  step %c: %s\n", c, field.lastEvent().c_str()), field.setLastEvent("");
         }
         if (!shot.empty()) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
@@ -274,7 +389,7 @@ int main(int argc, char** argv) {
     bool running = true;
     Uint64 last = SDL_GetPerformanceCounter();
     double acc = 0;
-    bool aPrev = true, upPrev = true, downPrev = true;
+    bool aPrev = true, upPrev = true, downPrev = true, bPrev = true, leftPrev = true, rightPrev = true;
 
     while (running) {
         SDL_Event e;
@@ -292,6 +407,9 @@ int main(int argc, char** argv) {
             }
             case SDLK_F1: debug = !debug; break;
             case SDLK_F2: field.noClip = !field.noClip; break;
+            case SDLK_F3: field.encounters = !field.encounters;
+                field.setLastEvent(field.encounters ? "random battles on" : "random battles off"); break;
+            case SDLK_F4: if (!battle) field.startBattle(randomFormation(rom, field.encounterArea(), field.vehicle(), field.random8())); break;
             case SDLK_TAB: wide = !wide; frame.resize(wide ? 256 : 160, 144); break;
             case SDLK_p: pal = (pal + 1) % kNumPalettes; break;
             case SDLK_F12: {
@@ -319,19 +437,33 @@ int main(int argc, char** argv) {
             const bool aHeld = k[SDL_SCANCODE_Z] || k[SDL_SCANCODE_SPACE] || k[SDL_SCANCODE_RETURN];
             const bool up = d == int(Dir::Up), down = d == int(Dir::Down);
             const bool aPressed = aHeld && !aPrev;
-            if (text.active()) {
+            const bool bHeld = k[SDL_SCANCODE_X] || k[SDL_SCANCODE_BACKSPACE];
+            const bool left = d == int(Dir::Left), right = d == int(Dir::Right);
+            if (battle) {
+                BattleInput in;
+                in.a = aPressed; in.aHeld = aHeld; in.b = bHeld && !bPrev;
+                in.up = up && !upPrev; in.down = down && !downPrev;
+                in.left = left && !leftPrev; in.right = right && !rightPrev;
+                battle->tick(in);
+                if (battle->finished()) finishBattle();
+            } else if (text.active()) {
                 field.tick(-1);                      // scripted actor moves animate under text
                 text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
             } else {
                 if (aPressed && !field.player().moveFrames) talk(rom, field, text);
                 else field.tick(d);
             }
-            aPrev = aHeld; upPrev = up; downPrev = down;
+            aPrev = aHeld; upPrev = up; downPrev = down; bPrev = bHeld; leftPrev = left; rightPrev = right;
         }
         refreshTiles();
-        renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
-        renderTextBox(text, tiles, opts, frame);
-        toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
+        if (battle) {
+            renderBattle(*battle, bgfx, tiles, opts, frame);
+            toArgb(frame, kPalettes[pal], nullptr, argb);
+        } else {
+            renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
+            renderTextBox(text, tiles, opts, frame);
+            toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
+        }
         if (!tex || texW != frame.w) {
             if (tex) SDL_DestroyTexture(tex);
             tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, frame.w, frame.h);

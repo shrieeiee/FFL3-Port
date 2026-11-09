@@ -34,8 +34,19 @@ No game data lives in this repo. The port reads graphics, maps, text and so on s
 - Verified against the real game: Talon exit/boarding round trip, house door, the Elder's
   cutscene (actor ends at the same block, same facing)
 
+**Milestone 5 – battles (stage 1)** ✅
+- Random encounters with the game's own per-map rates and encounter tables, and scripted
+  battles (event $1B) – boss fights included
+- Formations, monster counts and placement exactly as the original works them out (checked
+  against VRAM), monster stats/names/talents, every monster picture decoded from the ROM
+- Battle screen pixel-identical to the real game for the Fight/Run/Auto menu and the status
+  panel; command menus, target brackets, typed battle messages in the game's own wording
+- Fight (Weapon) → pick a target, Run, Auto; win / run / party wiped (back to the start)
+- **Provisional:** hit/damage/critical maths, enemy AI and turn-order tie-breaks are stand-ins
+  until the battle effect VM (0C:4008) is decoded. Talent/Magic/Item commands aren't wired yet.
+
 Not yet: event $10 and most $12 effects (logged in the title bar), chests, shops, menus,
-battles (logged as "BATTLE"), music, NPC wandering, saving, the opening sequence itself.
+music, NPC wandering, saving, the opening sequence itself.
 
 ## Building
 
@@ -58,15 +69,19 @@ It must be **Final Fantasy Legend III (U)**, MD5 `db156bc96b528996ce1bf771195171
 ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
      [--walk UDLRAW...] [--shot out.bmp] [--debug] [--dump-blocks out.bin]
      [--text ID]                                                    (headless/testing)
+     [--battle HH [--keys ABUDLRW*] [--shot out.bmp] [--shot-at N] [--dump-view f]]
 ```
 
 | Key | Action |
 |---|---|
 | Arrows / WASD | walk |
-| Z / Space / Enter | talk, advance text, confirm |
+| Z / Space / Enter | talk, advance text, confirm (A) |
+| X / Backspace | back (B) – battle menus |
 | Tab | GB 160×144 ↔ widescreen 256×144 |
 | F1 | collision overlay (green walk, red solid, blue event) |
 | F2 | no-clip |
+| F3 | random battles on / off |
+| F4 | start a random battle for the current map |
 | PgUp / PgDn, `[` / `]` | previous / next map |
 | P | cycle palette (grey / DMG / Pocket) |
 | F12 | screenshot (BMP) |
@@ -76,6 +91,8 @@ ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
 - `tests/test_maps.sh saga3.gb` – C++ map loader vs the Python reference, all 192 maps
 - `tests/test_field.sh saga3.gb` – collision/exit behaviour, expected values taken from the
   real game running in the coverage emulator
+- `tests/test_battle.py build/ffl3 saga3.gb DUMPS` – formation layout, monster data, battle
+  windows and picture tiles vs VRAM dumps from the real game (VRAM checks skip without dumps)
 
 ## Reverse-engineering tools (`tools/`)
 

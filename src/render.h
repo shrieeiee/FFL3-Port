@@ -3,6 +3,7 @@
 #pragma once
 #include "field.h"
 #include "text.h"
+#include "battle.h"
 
 namespace ffl3 {
 
@@ -31,5 +32,17 @@ void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, 
 
 void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame& out,
                  std::vector<uint8_t>* debugTint = nullptr);
+
+// Battle graphics: monster pictures per group, cursor / bracket OBJs, party sprite pages.
+struct BattleGfx {
+    std::array<std::vector<Tile>, 3> monster;
+    Tile cursor{}, bracket{};
+    std::vector<std::array<Tile, 4>> member;      // front frame of each member's field sprite
+    void build(const Rom& rom, const Battle& b);
+};
+
+// Battle screen: pictures on BG rows 0-7 (blank tile $FF elsewhere), the window from WY down,
+// then OBJs. Font / frame tiles come from the shared set at $8800 (tc.bg[$80-$FF]).
+void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 } // namespace ffl3

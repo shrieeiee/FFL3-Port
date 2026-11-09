@@ -126,7 +126,7 @@ Usage counts over all 369 reachable NPC/special texts and every map's event bloc
 - $0D/$0E teleport: 06:6BA4 + (p-1)*3 = map, row|facing, col|facing (1384/1389 -> 1468)
 - $0F/$2F per-map text: map list 01:6503 (ptrs 01:6523) / 01:6563 (01:6569), bank $A text
 - $12 sub-commands (16b9): 1 vehicle 0, 2 nop, 4 redraw map, $B = $0E $37, $C = $0D $02, rest effects
-- $17 battle, formation p-1 (19ae) · $18 give item 03:762A[p-1] (1a02) · $1C music · $1D SFX
+- $17 SHOP p-1 (19ae → 01:6FD4; was mislabelled "battle" in milestone 4) · $1B battle (19d0) · $18 give item 03:762A[p-1] (1a02) · $1C music · $1D SFX
 - $25 Talon lift (1a95): carry the leader one block on · $3F (past the table end): boards the Talon
 - $26 actor (01:66e9): p low nibble = slot (0 = leader), high nibble 0-3 face (0 up 1 right
   2 down 3 left), 4 hide (id := 0), 5 show (id := wC370), 6/7 animation mode
@@ -152,3 +152,53 @@ Port starts where the real game first hands over control: map $0B (Talon) at (26
 with the event flags captured from wC760 at that moment. Party default names = character
 records 0-3 at 07:7A88 ($60 bytes each): Arthur, Curtis, Gloria, Sharon; then Myron, Lara,
 Dion, Faye, Dion, Borgin. Text code $1F n: n < 4 party, $10-$1F story character (07:7A88).
+
+## Battles (milestone 5)
+
+Entry
+- Event $1B (19d0): p ≠ $FF → hFFCA = p | $80 (fixed counts); p = $FF → wCA2D = 0, random (10f5).
+- Random encounter: after every step (01:4617), battle if random < 00:119A[header byte 4 >> 5]
+  (00 03 04 05 06 07 08 09). Area wCA2D = header byte 5 (00:02e7); 0 if event flag $31 clear;
+  $43 on map 1 with flag $CE (00:0409). Towns have rate 0.
+- 10f5: pack = area + (vehicle 1 or ≥4: +1, vehicle 2: +2); r = random; c = number of
+  thresholds 03:76BC (E5 BF 8C 4C 26 0C) that r is below; hFFCA = 03:76C2[pack*7 + c]
+  (bit 7 set = fixed counts).
+- 1126: formation = hFFCA & $7F, 5 bytes 0B:758B → wCC59, then 1d62 (0B:6CEE init, 0B:4000).
+
+Monster counts and placement (0B:5a18, matches VRAM)
+- wCC30[g] = size class + 1; 0B:5BD8[class+1] = (w-1)<<4 | (h-1): 4x4, 8x4, 4x8, 6x8, 8x8, 16x8.
+- Fixed: units[g] = ((counts & $3F) << 2g >> 4 & 3) + 1. Random: units0 = rnd(((counts&$C0)>>6)+1)+1;
+  room = 20 - w0*units0 (-2 if both group 0 and 1 are 4 wide); fit = room / w1;
+  total = rnd(fit+1); units1 = rnd(total)+1, units2 = total - units1 (if those groups exist).
+  rnd(n) = 00:1d2e.
+- Classes 0/1 (4 tall) stack two per column (rows 0 and 4): monsters = units*2.
+- First column = (20 - Σ w*units) / 2; groups left to right.
+
+Pictures
+- 0B:4301[m] = meta<<3 | variant; 0B:43CC[meta] = bank<<4 | class; tiles 0B:43C4[class];
+  planes = decompress [p0,p1) and [p1,next p0) from 0B:43E4+meta*4; tile i = bytes
+  (variant*count+i)*8.. of each plane interleaved. Row-major; class 4 skips the 2 top corners,
+  class 5 all 4 corners.
+
+Other tables
+- Talents 0B:533D + m*9: mask byte then ids; names 09:67F7 x8 (Nail, Tusk, …, $70+ ●/◆ elements).
+- Drops 0B:470D + m*4: element<<4|level, xp, gp, drop item.
+- Battle message fragments 09:79C6-7D57 ("Strike first!", "Unexpected attack!", "Ran away." /
+  "Can't run!", "Received N GP.", "X fell.", "A mighty blow!", "Missed!", "Won!",
+  "<leader>'s party / was beat……").
+- OBJ tiles: hand cursor $20 = 03:5430, target bracket $24 = 03:57B0. Party portraits = front
+  frame of each character's field sprite page (04:7000/7400/7200/7100/7300 for the starting
+  party; where the page comes from is not traced yet).
+
+Screen (VRAM, formation 00)
+- Fight menu: WY 64, two 10x10 boxes; group names rows 2/4/6 col 1; Fight/Run/Auto col 12;
+  cursor x 88, y 80+16k.
+- Status panel: box rows 0-6, guest box rows 6-9 (row 6 = f8…fa); member k at col 9*(k&1),
+  row 1+3*(k>>1): HP cols +3..5, '/' +6, max +7..9; MP next row; chosen command ("Weap")
+  replaces "/max" on the MP row. Command box (10x10) covers the other column; portraits there
+  are moved off-screen.
+- Messages: WY 88, 7-row box, two text lines (rows 2/4), typed and scrolled; party field
+  sprites at y 72, x 8+32k.
+
+Still to decode: battle effect VM (0C:4008; opcode = byte&$1F, tables 0C:4320/0C:433C) for
+hit/damage/critical/escape, enemy AI, Talent/Magic/Item, EXP/level-ups.

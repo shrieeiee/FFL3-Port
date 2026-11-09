@@ -74,10 +74,15 @@ public:
 
     // Hooks the game layer provides.
     std::function<void(int bank, uint16_t addr)> openText;   // show a text (rst $a0 etc.)
-    std::function<void(int formation)> startBattle;           // event $17
+    std::function<void(int hffca)> startBattle;               // event $1B / random encounter:
+                                                              // formation | $80 = fixed counts
+    std::function<void(int shop)> openShop;                   // event $17 (01:6FD4)
     std::function<void(int item)> giveItem;                   // event $18
     uint8_t music = 0, lastSfx = 0;                           // hCurrentMusic / hSFX
     bool noClip = false;
+    bool encounters = true;                                   // random battles on (debug toggle)
+    int encounterArea() const;                                // wCA2D (00:02e7 / 00:0409)
+    uint8_t random8() { rng_ = rng_ * 1103515245u + 12345u; return uint8_t(rng_ >> 16); }
 
 private:
     bool occupied(int row, int col, int selfSlot) const;
@@ -107,6 +112,7 @@ private:
     struct Return { int map, row, col; };
     std::vector<Return> returnStack_;  // wC7A0 / wC7C0
     std::string lastEvent_;
+    uint32_t rng_ = 0x5a6a3;
 };
 
 } // namespace ffl3

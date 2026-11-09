@@ -1,4 +1,5 @@
 #include "field.h"
+#include "battledata.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -166,7 +167,17 @@ void Field::onStepDone() {
     Actor& p = actors_[0];
     layer_ = blockAt(p.row, p.col) & 0x40;
     const uint8_t a = attrAt(p.row, p.col);     // 00:091b
-    if ((a & 0xc0) == 0xc0) runEventCommand(a & 0x3f, 0);
+    if ((a & 0xc0) == 0xc0) { runEventCommand(a & 0x3f, 0); return; }
+    // 01:4617: after each step, a battle with chance 00:119A[header byte 4 >> 5] / 256.
+    const int rate = encounterRate(rom_, hdr_.music_hi);
+    if (encounters && rate && random8() < rate && startBattle)
+        startBattle(randomFormation(rom_, encounterArea(), vehicle_, random8()));
+}
+
+int Field::encounterArea() const {
+    if (!flags_.test(0x31)) return 0;                  // 00:0409
+    if (map_ == 1 && flags_.test(0xce)) return 0x43;
+    return hdr_.unk2d;
 }
 
 int Field::faceObjectInFront() {
@@ -266,7 +277,15 @@ void Field::runEventCommand(int cmd, int param) {
             lastEvent_ = buf;
             return;
         }
-    case 0x17: if (startBattle) startBattle(param - 1); return;        // 19ae
+    case 0x17:                                                         // 19ae: shop 01:6FD4
+        if (openShop) openShop(param - 1);
+        std::snprintf(buf, sizeof buf, "shop %02X (not implemented)", param - 1);
+        lastEvent_ = buf;
+        return;
+    case 0x1b:                                                         // 19d0: battle
+        if (startBattle)
+            startBattle(param != 0xff ? (param | 0x80) : randomFormation(rom_, 0, vehicle_, random8()));
+        return;
     case 0x18: if (giveItem) giveItem(rom_.b(3, uint16_t(0x762a + param - 1))); return;  // 1a02
     case 0x1c: music = uint8_t(param); return;                          // 1a28
     case 0x1d: lastSfx = uint8_t(param); return;                        // 1a2e
