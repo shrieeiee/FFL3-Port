@@ -115,7 +115,8 @@ std::vector<MapExit> loadMapExits(const Rom& rom, int map) {
         e.dest = r[1];
         e.row = r[2] & 0x7f;
         e.col = r[3] & 0x7f;
-        e.facing = uint8_t(((r[2] >> 7) << 1) | (r[3] >> 7));
+        e.rawRow = r[2];
+        e.rawCol = r[3];
         v.push_back(e);
     }
     return v;

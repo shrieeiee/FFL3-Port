@@ -25,9 +25,17 @@ No game data lives in this repo. The port reads graphics, maps, text and so on s
 - Dialogue window, typewriter, auto-scroll and speaker waits - pixel-identical to the real game
 - Talk to NPCs (they turn to face you) and special objects
 
-Not yet: most event commands (they're logged in the title bar), chests, shops, NPC movement,
-menus, battles, music, vehicles (the Talon), save data / real event-flag state, and overworld
-collision is inferred rather than emulator-checked.
+**Milestone 4 – events & new game** ✅
+- New Game starts where the real game hands you control (aboard the Talon), with the real
+  event-flag state; flag-gated NPCs appear or stay hidden like the original
+- Object slots like the game, including the invisible "talk across the counter" companions
+- Field events: exits, buildings, town ↔ world (vehicle modes), teleports, signs/per-map texts,
+  the Talon lift and boarding, scripted cutscenes (actors face/walk/hide/show; scripts wait)
+- Verified against the real game: Talon exit/boarding round trip, house door, the Elder's
+  cutscene (actor ends at the same block, same facing)
+
+Not yet: event $10 and most $12 effects (logged in the title bar), chests, shops, menus,
+battles (logged as "BATTLE"), music, NPC wandering, saving, the opening sequence itself.
 
 ## Building
 

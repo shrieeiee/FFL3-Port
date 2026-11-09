@@ -35,7 +35,7 @@ static void drawSprite(const TileCache& tc, uint8_t obp, Frame& out, int sx, int
     }
 }
 
-static void frameFor(const Mover& m, int baseTile, int& tile, bool& flip) {
+static void frameFor(const Actor& m, int baseTile, int& tile, bool& flip) {
     tile = baseTile; flip = false;
     const bool step = m.moveFrames > 0 && ((m.animTick >> 3) & 1);
     switch (m.facing) {
@@ -48,7 +48,7 @@ static void frameFor(const Mover& m, int baseTile, int& tile, bool& flip) {
 
 void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame& out,
                  std::vector<uint8_t>* debugTint) {
-    const Mover& p = f.player();
+    const Actor& p = f.player();
     const int mapW = f.cols() * 16, mapH = f.rows() * 16;
     // Camera: the game puts the leader at scroll + $50 and the screen at scroll + (16, 8),
     // i.e. the leader's body at (72, 64) on a 160x144 screen. Keep that centring for any width.
@@ -74,16 +74,18 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
             }
         }
     }
-    auto screenPos = [&](const Mover& m, int& sx, int& sy) {
+    auto screenPos = [&](const Actor& m, int& sx, int& sy) {
         int dy = m.row * 16 + m.subY() - camY, dx = m.col * 16 + m.subX() - camX;
         dy = wrap(dy + mapH / 2, mapH) - mapH / 2;   // nearest wrapped copy
         dx = wrap(dx + mapW / 2, mapW) - mapW / 2;
         sx = dx; sy = dy;
     };
-    for (const Npc& n : f.npcs()) {
+    for (int i = 1; i < Field::kSlots; i++) {
+        const Actor& n = f.actors()[size_t(i)];
+        if (!n.drawn()) continue;
         int sx, sy, tile; bool flip;
-        screenPos(n.m, sx, sy);
-        frameFor(n.m, n.spriteTile, tile, flip);
+        screenPos(n, sx, sy);
+        frameFor(n, n.spriteTile, tile, flip);
         drawSprite(tc, o.obp, out, sx, sy, tile, flip);
     }
     int sx, sy, tile; bool flip;

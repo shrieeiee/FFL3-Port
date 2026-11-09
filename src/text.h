@@ -18,6 +18,7 @@
 // Every NPC text (239 of them) parses with these lengths and ends exactly where the next one
 // begins - see tools/ffl3text.py.
 #pragma once
+#include "flags.h"
 #include "rom.h"
 #include <array>
 #include <bitset>
@@ -26,11 +27,6 @@
 #include <vector>
 
 namespace ffl3 {
-
-struct GameFlags {
-    std::bitset<256> event;            // wC760
-    bool test(int f) const { return event.test(size_t(f & 0xff)); }
-};
 
 class TextBox {
 public:
@@ -55,6 +51,7 @@ public:
     std::array<std::string, 4> partyNames{{"Arthur", "Curtis", "Sharon", "Gloria"}};
     std::function<void(int cmd, int param)> onEvent;   // event command refs (hi < $40)
     std::function<void(const std::string&)> log;
+    std::function<bool()> isBusy;                      // scripts wait for actor moves
 
 private:
     enum class State { Idle, Run, WaitA, WaitScroll, WaitEnd, Choice };

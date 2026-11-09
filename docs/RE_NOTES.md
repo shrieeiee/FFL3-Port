@@ -118,3 +118,37 @@ Verified tile-for-tile against VRAM.
   Verified: port's window = real game's frame, pixel for pixel (Float text).
 - Emulator trick (tools/talkcap.py): rewrite the Talon-console object (slot 10, wC20A/wC35A)
   into any NPC id + kind 0, press A -> the real game shows that NPC's text.
+
+## Event commands (milestone 4) - table 00:124A, dispatcher 00:1236, param = wCA28
+Usage counts over all 369 reachable NPC/special texts and every map's event blocks:
+- $00/$01 exit table (13f1) · $02/$03 push return + exit (13ac) · $04/$05 pop return (14aa)
+- $0A vehicle := 0, push, exit (13a8, world -> town) · $0B/$0C vehicle := 2, pop (14a5, town -> world)
+- $0D/$0E teleport: 06:6BA4 + (p-1)*3 = map, row|facing, col|facing (1384/1389 -> 1468)
+- $0F/$2F per-map text: map list 01:6503 (ptrs 01:6523) / 01:6563 (01:6569), bank $A text
+- $12 sub-commands (16b9): 1 vehicle 0, 2 nop, 4 redraw map, $B = $0E $37, $C = $0D $02, rest effects
+- $17 battle, formation p-1 (19ae) · $18 give item 03:762A[p-1] (1a02) · $1C music · $1D SFX
+- $25 Talon lift (1a95): carry the leader one block on · $3F (past the table end): boards the Talon
+- $26 actor (01:66e9): p low nibble = slot (0 = leader), high nibble 0-3 face (0 up 1 right
+  2 down 3 left), 4 hide (id := 0), 5 show (id := wC370), 6/7 animation mode
+- $27/$28 walk actor (01:67f5 / 01:691e): slot = low nibble, steps = high nibble
+- Most used: $26 (245), $28 (98), $17 (64), $27 (44), $1D (44), $10 (30), $1B (25), $12 (24)
+  ($10 is a 16-way sub-dispatcher on p >> 4, not decoded yet.)
+
+## Facing / directions
+wC6EE >> 6 and object wC2D0 >> 6: 0 up, 1 right, 2 down, 3 left (emulator-checked).
+Exits/teleports (1468): dir = (b3 bit7) << 1 | (b2 bit7). Objects: dir = (b2 bit7) << 1 | (b3 bit7).
+
+## Object slots (00:05bf / 00:0730)
+Slot 0 = leader, 1 = follower; map objects fill slots from 2 in order. Shopkeepers (kind 2) and
+kind-0 objects with id >= $DF get a companion slot right after them: a copy one block in front
+(talk-across-counter proxy). Verified against RAM on maps $0B and $10.
+
+## Flags (00:3cb2)
+wC760 bit n = byte n>>3, bit 7-(n&7) (MSB first); carry = set. Flag-gated objects appear when set.
+Vehicle mask table 00:087A: ff,bc,40,ff,bc,bc for modes 0-5 (+ wC6F1 byte each).
+
+## New game
+Port starts where the real game first hands over control: map $0B (Talon) at (26,7) facing up,
+with the event flags captured from wC760 at that moment. Party default names = character
+records 0-3 at 07:7A88 ($60 bytes each): Arthur, Curtis, Gloria, Sharon; then Myron, Lara,
+Dion, Faye, Dion, Borgin. Text code $1F n: n < 4 party, $10-$1F story character (07:7A88).

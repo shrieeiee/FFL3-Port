@@ -8,6 +8,7 @@
 #include "render.h"
 #include <SDL.h>
 #include <algorithm>
+#include <iterator>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -61,7 +62,7 @@ int nextValid(const Rom& rom, int from, int dir) {
 void talk(const Rom& rom, Field& field, TextBox& tb) {
     const int i = field.faceObjectInFront();
     if (i < 0) return;
-    const MapObject& o = field.npcs()[size_t(i)].obj;
+    const MapObject& o = field.actors()[size_t(i)].obj;
     char buf[96];
     switch (o.kind) {
     case 0:                                          // 00:0995 - dialogue, 0A:4004[id-1]
@@ -81,10 +82,10 @@ void talk(const Rom& rom, Field& field, TextBox& tb) {
 
 int dirFromChar(char c) {
     switch (c) {
-    case 'D': case 'd': return 0;
-    case 'U': case 'u': return 1;
-    case 'L': case 'l': return 2;
-    case 'R': case 'r': return 3;
+    case 'U': case 'u': return int(Dir::Up);
+    case 'R': case 'r': return int(Dir::Right);
+    case 'D': case 'd': return int(Dir::Down);
+    case 'L': case 'l': return int(Dir::Left);
     default: return -1;
     }
 }
@@ -93,20 +94,22 @@ int dirFromChar(char c) {
 
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk;
-    int textId = -1;
-    int mapId = 0x02, scale = 5, startRow = -1, startCol = -1;
-    bool wide = false, debug = false;
+    int textId = -1, runTextId = -1;
+    int mapId = -1, scale = 5, startRow = -1, startCol = -1;
+    bool wide = false, debug = false, showSlots = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--map" && i + 1 < argc) mapId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--pos" && i + 1 < argc) std::sscanf(argv[++i], "%d,%d", &startRow, &startCol);
         else if (a == "--walk" && i + 1 < argc) walk = argv[++i];
         else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
+        else if (a == "--run-text" && i + 1 < argc) runTextId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--dump-blocks" && i + 1 < argc) dumpTiles = argv[++i];
         else if (a == "--scale" && i + 1 < argc) scale = std::max(1, std::atoi(argv[++i]));
         else if (a == "--wide") wide = true;
         else if (a == "--debug") debug = true;
+        else if (a == "--slots") showSlots = true;
         else if (a.size() > 2 && a[0] == '-' && a[1] == '-') { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
         else romPath = a;
     }
@@ -121,13 +124,35 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Field field(rom);
     GameFlags flags;
+    // New game: the state the real game is in when the player first gets control (aboard the
+    // Talon after the opening). Event flags captured from wC760 in the emulator; until the
+    // opening script runs in the port, this is the starting point.
+    static const uint8_t kStartFlags[32] = {
+        0x01, 0x02, 0x80, 0x78, 0x03, 0xc8, 0xc0, 0x00, 0x40, 0x00, 0x0c, 0x91, 0x1a, 0x00, 0x00, 0x01,
+        0x81, 0x00, 0x02, 0xa2, 0xa0, 0x02, 0x0f, 0x40, 0x15, 0x20, 0x02, 0x10, 0x00, 0x00, 0x03, 0xff};
+    flags.loadEventBytes(kStartFlags);
+    Field field(rom, flags);
     TextBox text(rom);
     text.flags = &flags;
     text.onEvent = [&](int cmd, int param) { field.runEventCommand(cmd, param); };
+    text.isBusy = [&] { return field.busy(); };
+    field.openText = [&](int bank, uint16_t addr) { text.open(bank, addr); };
+    field.startBattle = [&](int formation) {
+        char b[64]; std::snprintf(b, sizeof b, "BATTLE: formation %02X (battles not implemented yet)", formation);
+        field.setLastEvent(b);
+    };
+    field.giveItem = [&](int item) {
+        char b[64]; std::snprintf(b, sizeof b, "got item %02X", item);
+        field.setLastEvent(b);
+    };
     text.log = [&](const std::string& m) { field.setLastEvent(m); };
-    if (!field.enterMap(mapId, startRow, startCol)) field.enterMap(nextValid(rom, mapId, 1));
+    if (mapId < 0) {                                  // new game
+        field.enterMap(0x0b, startRow >= 0 ? startRow : 26, startCol >= 0 ? startCol : 7, Dir::Up);
+    } else {
+        if (mapId < 6) field.setVehicle(2);            // debug jump straight onto a world map
+        if (!field.enterMap(mapId, startRow, startCol)) field.enterMap(nextValid(rom, mapId, 1));
+    }
     TileCache tiles;
     tiles.build(rom, field);
     RenderOpts opts;
@@ -170,6 +195,22 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // ---- headless: run NPC text `runTextId` in the field (events + actor moves), auto-A ----
+    if (runTextId >= 0) {
+        text.open(0xa, rom.ptr(0xa, 0x4004, runTextId - 1));
+        for (int f = 0; f < 60 * 120 && (text.active() || field.busy()); f++) {
+            field.tick(-1);
+            text.tick(f % 20 == 0, false, false, false);
+        }
+        std::printf("leader %d,%d facing %d\n", field.player().row, field.player().col, int(field.player().facing));
+        for (int i = 1; i < Field::kSlots; i++) {
+            const Actor& a = field.actors()[size_t(i)];
+            if (a.used) std::printf("slot %d id %02X pos %d,%d facing %d\n", i, a.id, a.row, a.col, int(a.facing));
+        }
+        std::printf("[%s]\n", field.lastEvent().c_str());
+        return 0;
+    }
+
     // ---- headless: tests / tooling ----------------------------------------------------
     if (!dumpTiles.empty() || !shot.empty() || !walk.empty()) {
         if (!dumpTiles.empty()) {
@@ -183,11 +224,11 @@ int main(int argc, char** argv) {
             if (c == 'A' || c == 'a') {
                 if (text.active()) text.tick(true, true, false, false);
                 else talk(rom, field, text);
-                for (int i = 0; i < 40; i++) text.tick(false, false, false, false);
+                for (int i = 0; i < 40; i++) { field.tick(-1); text.tick(false, false, false, false); }
                 continue;
             }
             if (c == 'W' || c == 'w') {
-                for (int i = 0; i < 60; i++) text.tick(false, false, false, false);
+                for (int i = 0; i < 60; i++) { field.tick(-1); text.tick(false, false, false, false); }
                 continue;
             }
             const int d = dirFromChar(c);
@@ -204,10 +245,20 @@ int main(int argc, char** argv) {
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
             if (!saveBmp(argb, frame.w, frame.h, shot.c_str())) return 1;
         }
+        if (showSlots) {
+            std::printf("slots:");
+            for (int i = 0; i < Field::kSlots; i++) {
+                const Actor& a = field.actors()[size_t(i)];
+                if (a.used) std::printf(" %d:%02X%s%s", i, a.savedId, a.id ? "" : "(hidden)", a.proxy ? "(proxy)" : "");
+            }
+            std::printf("\n");
+        }
         std::printf("map %02X layout %02X gfx %02X sprites %02X  %dx%d  player %d,%d  npcs %zu  [%s]\n",
                     field.mapId(), field.header().layout, field.header().gfxset, field.header().unk1e,
                     field.layout().w, field.layout().h, field.player().row, field.player().col,
-                    field.npcs().size(), field.lastEvent().c_str());
+                    size_t(std::count_if(field.actors().begin() + 1, field.actors().end(),
+                                         [](const Actor& a) { return a.drawn(); })),
+                    field.lastEvent().c_str());
         return 0;
     }
 
@@ -232,8 +283,13 @@ int main(int argc, char** argv) {
             if (e.type != SDL_KEYDOWN) continue;
             switch (e.key.keysym.sym) {
             case SDLK_ESCAPE: running = false; break;
-            case SDLK_PAGEDOWN: case SDLK_RIGHTBRACKET: field.enterMap(nextValid(rom, field.mapId(), 1)); break;
-            case SDLK_PAGEUP: case SDLK_LEFTBRACKET: field.enterMap(nextValid(rom, field.mapId(), -1)); break;
+            case SDLK_PAGEDOWN: case SDLK_RIGHTBRACKET: case SDLK_PAGEUP: case SDLK_LEFTBRACKET: {
+                const bool fwd = e.key.keysym.sym == SDLK_PAGEDOWN || e.key.keysym.sym == SDLK_RIGHTBRACKET;
+                const int m = nextValid(rom, field.mapId(), fwd ? 1 : -1);
+                field.setVehicle(m < 6 ? 2 : 0);
+                field.enterMap(m);
+                break;
+            }
             case SDLK_F1: debug = !debug; break;
             case SDLK_F2: field.noClip = !field.noClip; break;
             case SDLK_TAB: wide = !wide; frame.resize(wide ? 256 : 160, 144); break;
@@ -256,14 +312,15 @@ int main(int argc, char** argv) {
             acc -= 1.0 / 60.0;
             const Uint8* k = SDL_GetKeyboardState(nullptr);
             int d = -1;
-            if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = 0;
-            else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = 1;
-            else if (k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A]) d = 2;
-            else if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) d = 3;
+            if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = int(Dir::Down);
+            else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = int(Dir::Up);
+            else if (k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A]) d = int(Dir::Left);
+            else if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) d = int(Dir::Right);
             const bool aHeld = k[SDL_SCANCODE_Z] || k[SDL_SCANCODE_SPACE] || k[SDL_SCANCODE_RETURN];
-            const bool up = d == 1, down = d == 0;
+            const bool up = d == int(Dir::Up), down = d == int(Dir::Down);
             const bool aPressed = aHeld && !aPrev;
             if (text.active()) {
+                field.tick(-1);                      // scripted actor moves animate under text
                 text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
             } else {
                 if (aPressed && !field.player().moveFrames) talk(rom, field, text);

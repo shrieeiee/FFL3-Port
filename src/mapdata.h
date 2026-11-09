@@ -59,7 +59,7 @@ struct MapExit {
     uint8_t regionRow, regionCol;     // 4x4-block (64 px) region the leader must be in
     uint8_t dest;                     // destination map
     uint8_t row, col;                 // destination scroll origin in blocks (leader = +5,+5)
-    uint8_t facing;                   // top bits of bytes 2/3 -> wC6EE
+    uint8_t rawRow, rawCol;           // bytes 2/3 incl. facing bits (00:1468)
 };
 
 MapHeader loadMapHeader(const Rom& rom, int map);

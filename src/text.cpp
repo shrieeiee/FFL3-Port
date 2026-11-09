@@ -32,6 +32,16 @@ TextBox::TextBox(const Rom& rom) : rom_(rom) {
         e.assign(d + o + 1, d + o + 1 + n);
         o += 1u + n;
     }
+    // Default party names = the first four character records (07:7A88, $60 bytes each).
+    for (int m = 0; m < 4; m++) {
+        std::string n;
+        for (int i = 0; i < 6; i++) {
+            const uint8_t t = rom.b(7, uint16_t(0x7a88 + m * 0x60 + i));
+            if (t >= 0xba && t <= 0xd3) n += char('A' + t - 0xba);
+            else if (t >= 0xd4 && t <= 0xed) n += char('a' + t - 0xd4);
+        }
+        partyNames[size_t(m)] = n;
+    }
     clear();
 }
 
@@ -137,15 +147,25 @@ void TextBox::step() {
         case 0x07: case 0x14: clear(); break;
         case 0x1c: state_ = State::WaitA; return;     // 27c5: page break before a new speaker
         case 0x05: case 0x4c: break;
-        case 0x1f: case 0x1d: case 0x20: case 0x21: {   // party member name
-            const int m = a[0] & 3;
-            for (char c : partyNames[size_t(m)]) {
-                uint8_t t = 0xff;
-                if (c >= 'A' && c <= 'Z') t = uint8_t(0xba + c - 'A');
-                else if (c >= 'a' && c <= 'z') t = uint8_t(0xd4 + c - 'a');
-                else if (c >= '0' && c <= '9') t = uint8_t(0xb0 + c - '0');
-                putGlyph(t);
+        case 0x1f: {                     // 2955 (index via 20de): party member or story character
+            int m = a[0];
+            if (m == 0x80 || m == 0xff) m = 0;                 // wCD4C / wCD36 (current actor)
+            else if (m >= 0x80) m -= 0x7b;
+            else if (m >= 5 && m < 9) m -= 5;
+            std::vector<uint8_t> name;
+            if (m < 4) {
+                for (char c : partyNames[size_t(m)]) {
+                    uint8_t t = 0xff;
+                    if (c >= 'A' && c <= 'Z') t = uint8_t(0xba + c - 'A');
+                    else if (c >= 'a' && c <= 'z') t = uint8_t(0xd4 + c - 'a');
+                    else if (c >= '0' && c <= '9') t = uint8_t(0xb0 + c - '0');
+                    name.push_back(t);
+                }
+            } else if (m >= 0x10 && m < 0x20) {                // 07:7A88 + (m-$0C) * $60, 6 chars
+                for (int i = 0; i < 6; i++) name.push_back(rom_.b(7, uint16_t(0x7a88 + (m - 0x0c) * 0x60 + i)));
+                while (!name.empty() && name.back() == 0xff) name.pop_back();
             }
+            for (uint8_t t : name) putGlyph(t);
             break;
         }
         case 0x36: if (flags) flags->event.set(a[0]); break;
@@ -230,6 +250,7 @@ void TextBox::tick(bool aPressed, bool aHeld, bool upPressed, bool downPressed) 
         }
         return;
     case State::Run:
+        if (isBusy && isBusy()) return;
         if (delay_ > 0 && !aHeld) { delay_--; return; }
         step();
         delay_ = 1;                      // ~2 frames per character, faster while A is held
