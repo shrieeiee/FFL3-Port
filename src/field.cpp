@@ -159,6 +159,28 @@ void Field::runBlockEvent(uint8_t cmd) {
     }
 }
 
+int Field::faceObjectInFront() {
+    static const int kDr[] = {1, -1, 0, 0}, kDc[] = {0, 0, -1, 1};
+    const int d = int(player_.facing);
+    const int r = wrap(player_.row + kDr[d], rows()), c = wrap(player_.col + kDc[d], cols());
+    for (size_t i = 0; i < npcs_.size(); i++) {
+        Mover& m = npcs_[i].m;
+        if (m.row != r || m.col != c) continue;
+        static const Dir kOpp[] = {Dir::Up, Dir::Down, Dir::Right, Dir::Left};
+        if (npcs_[i].obj.kind == 0) m.facing = kOpp[d];
+        return int(i);
+    }
+    return -1;
+}
+
+void Field::runEventCommand(int cmd, int param) {
+    (void)param;
+    if (cmd <= 5) { runBlockEvent(uint8_t(cmd)); return; }
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "script event %02X param %02X (not implemented)", cmd, param);
+    lastEvent_ = buf;
+}
+
 bool Field::warpByExitTable() {
     const int rr = player_.row >> 2, rc = player_.col >> 2;   // 64 px regions
     for (size_t i = 0; i < exits_.size(); i++) {

@@ -2,6 +2,7 @@
 // exactly like the LCD would, at GB size or a wider view.
 #pragma once
 #include "field.h"
+#include "text.h"
 
 namespace ffl3 {
 
@@ -23,6 +24,10 @@ struct TileCache {
     int map = -1;
     void build(const Rom& rom, const Field& f);
 };
+
+// The dialogue window (WY=80, 20x8 tiles at $9C00): frame $F7/$FC/$F9/$FB/$F8/$FA,
+// text lines on window rows 2, 4, 6. Centred horizontally in wide views.
+void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame& out,
                  std::vector<uint8_t>* debugTint = nullptr);

@@ -47,7 +47,7 @@ struct MapObject {
     uint8_t row, col;                 // block coords (low 6 bits of bytes 2/3)
     uint8_t flagsY, flagsX;           // top 2 bits of bytes 2/3 (wC2D0 / wC360)
     uint8_t move;                     // wC320/wC340: movement type (low 5 bits)
-    uint8_t speed;                    // wC350: top 2 bits of byte 4
+    uint8_t kind;                     // wC350: top 2 bits of byte 4 - 0 talk, 1 chest, 2 shop, 3 special
     uint8_t sprite;                   // raw byte 5
     uint8_t spriteTile() const {      // wC280: OBJ tile base
         return (sprite & 0xc0) ? uint8_t((sprite & 0x3f) + 0x60) : uint8_t((sprite & 0x07) << 4);

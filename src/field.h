@@ -56,6 +56,11 @@ public:
     // The 4 BG tiles drawn for a block (01:5ea6: other-layer blocks show block 1 / 0).
     const std::array<uint8_t, 4>& drawnTiles(uint8_t block) const;
     const std::string& lastEvent() const { return lastEvent_; }
+    void setLastEvent(const std::string& s) { lastEvent_ = s; }
+    // Index of the object directly in front of the leader (01:431e), or -1. Turns it to face us.
+    int faceObjectInFront();
+    // Event command from text/scripts (00:1236) with parameter (wCA28).
+    void runEventCommand(int cmd, int param);
     bool noClip = false;
 
 private:

@@ -1,9 +1,9 @@
-// FFL3 / SaGa 3 PC port - milestone 2: walk the field.
+// FFL3 / SaGa 3 PC port - milestone 3: walk the field and talk.
 //
 //   ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--walk UDLR...] [--shot out.bmp]
 //                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N]
 //
-// Keys: arrows/WASD walk, F1 collision overlay, F2 no-clip, Tab wide/GB view,
+// Keys: arrows/WASD walk, Z/Space/Enter talk + advance text, F1 collision overlay, F2 no-clip, Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "render.h"
 #include <SDL.h>
@@ -57,6 +57,28 @@ int nextValid(const Rom& rom, int from, int dir) {
     return from;
 }
 
+// What happens when A is pressed at an object (00:097f, by object kind wC350).
+void talk(const Rom& rom, Field& field, TextBox& tb) {
+    const int i = field.faceObjectInFront();
+    if (i < 0) return;
+    const MapObject& o = field.npcs()[size_t(i)].obj;
+    char buf[96];
+    switch (o.kind) {
+    case 0:                                          // 00:0995 - dialogue, 0A:4004[id-1]
+        if (o.id == 0 || o.id == 0xff) return;
+        tb.open(0xa, rom.ptr(0xa, 0x4004, o.id - 1));
+        break;
+    case 3:                                          // 00:09b7 - special objects, 0A:791E[id-1]
+        if (o.id == 0 || o.id >= 9) return;
+        tb.open(0xa, rom.ptr(0xa, 0x791e, o.id - 1));
+        break;
+    default:                                         // 1 = chest (00:09d4), 2 = shop (0A:6FD4)
+        std::snprintf(buf, sizeof buf, "%s %02X (not implemented)", o.kind == 1 ? "chest" : "shop", o.id);
+        field.setLastEvent(buf);
+        break;
+    }
+}
+
 int dirFromChar(char c) {
     switch (c) {
     case 'D': case 'd': return 0;
@@ -71,6 +93,7 @@ int dirFromChar(char c) {
 
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk;
+    int textId = -1;
     int mapId = 0x02, scale = 5, startRow = -1, startCol = -1;
     bool wide = false, debug = false;
     for (int i = 1; i < argc; i++) {
@@ -78,6 +101,7 @@ int main(int argc, char** argv) {
         if (a == "--map" && i + 1 < argc) mapId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--pos" && i + 1 < argc) std::sscanf(argv[++i], "%d,%d", &startRow, &startCol);
         else if (a == "--walk" && i + 1 < argc) walk = argv[++i];
+        else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--dump-blocks" && i + 1 < argc) dumpTiles = argv[++i];
         else if (a == "--scale" && i + 1 < argc) scale = std::max(1, std::atoi(argv[++i]));
@@ -98,6 +122,11 @@ int main(int argc, char** argv) {
     }
 
     Field field(rom);
+    GameFlags flags;
+    TextBox text(rom);
+    text.flags = &flags;
+    text.onEvent = [&](int cmd, int param) { field.runEventCommand(cmd, param); };
+    text.log = [&](const std::string& m) { field.setLastEvent(m); };
     if (!field.enterMap(mapId, startRow, startCol)) field.enterMap(nextValid(rom, mapId, 1));
     TileCache tiles;
     tiles.build(rom, field);
@@ -109,6 +138,38 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> tint;
     auto refreshTiles = [&] { if (tiles.map != field.mapId()) tiles.build(rom, field); };
 
+    // ---- headless: play NPC text `textId`, print the window at every wait -----------------
+    if (textId >= 0) {
+        auto ascii = [](uint8_t t) -> char {
+            if (t >= 0xba && t <= 0xd3) return char('A' + t - 0xba);
+            if (t >= 0xd4 && t <= 0xed) return char('a' + t - 0xd4);
+            if (t >= 0xb0 && t <= 0xb9) return char('0' + t - 0xb0);
+            switch (t) { case 0xff: return ' '; case 0xaf: case 0xfe: return '.'; case 0xac: return ',';
+                         case 0xee: case 0xef: return '"'; case 0xf0: return ':'; case 0xf4: return '?';
+                         case 0xf3: return '!'; case 0xf2: return '-'; case 0xad: return '\''; default: return '#'; }
+        };
+        text.open(0xa, rom.ptr(0xa, 0x4004, textId - 1));
+        for (int page = 0; page < 60 && text.active(); page++) {
+            for (int f = 0; f < 4000 && text.active() && !text.waitingForA() && !text.choosing(); f++)
+                text.tick(false, false, false, false);
+            std::printf("--- page %d%s\n", page, text.choosing() ? " (choice)" : "");
+            for (const auto& l : text.lines()) {
+                std::string s;
+                for (uint8_t t : l) s += ascii(t);
+                std::printf("|%s|\n", s.c_str());
+            }
+            text.tick(true, true, false, false);
+        }
+        std::printf("=== history\n");
+        for (const auto& l : text.history) {
+            std::string s;
+            for (uint8_t t : l) s += ascii(t);
+            std::printf("#%s#\n", s.c_str());
+        }
+        std::printf("[%s]\n", field.lastEvent().c_str());
+        return 0;
+    }
+
     // ---- headless: tests / tooling ----------------------------------------------------
     if (!dumpTiles.empty() || !shot.empty() || !walk.empty()) {
         if (!dumpTiles.empty()) {
@@ -117,9 +178,20 @@ int main(int argc, char** argv) {
             std::fwrite(field.layout().blocks.data(), 1, field.layout().blocks.size(), f);
             std::fclose(f);
         }
+        // Script: U/D/L/R step, A = press A (talk / advance text) then 40 frames, W = 60 frames.
         for (char c : walk) {
+            if (c == 'A' || c == 'a') {
+                if (text.active()) text.tick(true, true, false, false);
+                else talk(rom, field, text);
+                for (int i = 0; i < 40; i++) text.tick(false, false, false, false);
+                continue;
+            }
+            if (c == 'W' || c == 'w') {
+                for (int i = 0; i < 60; i++) text.tick(false, false, false, false);
+                continue;
+            }
             const int d = dirFromChar(c);
-            if (d < 0) continue;
+            if (d < 0 || text.active()) continue;
             field.tick(d);
             for (int i = 0; i < 16 && field.player().moveFrames; i++) field.tick(-1);
             refreshTiles();
@@ -128,6 +200,7 @@ int main(int argc, char** argv) {
         }
         if (!shot.empty()) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
+            renderTextBox(text, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
             if (!saveBmp(argb, frame.w, frame.h, shot.c_str())) return 1;
         }
@@ -150,6 +223,7 @@ int main(int argc, char** argv) {
     bool running = true;
     Uint64 last = SDL_GetPerformanceCounter();
     double acc = 0;
+    bool aPrev = true, upPrev = true, downPrev = true;
 
     while (running) {
         SDL_Event e;
@@ -186,10 +260,20 @@ int main(int argc, char** argv) {
             else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = 1;
             else if (k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A]) d = 2;
             else if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) d = 3;
-            field.tick(d);
+            const bool aHeld = k[SDL_SCANCODE_Z] || k[SDL_SCANCODE_SPACE] || k[SDL_SCANCODE_RETURN];
+            const bool up = d == 1, down = d == 0;
+            const bool aPressed = aHeld && !aPrev;
+            if (text.active()) {
+                text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
+            } else {
+                if (aPressed && !field.player().moveFrames) talk(rom, field, text);
+                else field.tick(d);
+            }
+            aPrev = aHeld; upPrev = up; downPrev = down;
         }
         refreshTiles();
         renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
+        renderTextBox(text, tiles, opts, frame);
         toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         if (!tex || texW != frame.w) {
             if (tex) SDL_DestroyTexture(tex);

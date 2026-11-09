@@ -67,6 +67,9 @@ int main(int argc, char **argv) {
         if (tok[0] == 'w' && tok[1] >= '0' && tok[1] <= '9') { int n = atoi(tok + 1); for (int i = 0; i < n; i++) gb_run_frame(&gb); frames += n; }
         else if (!strncmp(tok, "phase:", 6)) dump_phase(tok + 6);
         else if (!strncmp(tok, "shot:", 5)) shot(tok + 5);
+        else if (!strncmp(tok, "poke:", 5)) {      // poke:ADDR:VAL (hex)
+            unsigned a, v; sscanf(tok + 5, "%x:%x", &a, &v); __gb_write(&gb, (uint16_t)a, (uint8_t)v);
+        }
         else if (!strncmp(tok, "dump:", 5)) {
             char p[512]; snprintf(p, sizeof p, "%s/%s.mem", outdir, tok + 5); FILE *o = fopen(p, "wb");
             for (unsigned a = 0; a < 0x10000; a++) fputc(__gb_read(&gb, a), o);

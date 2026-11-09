@@ -18,8 +18,16 @@ No game data lives in this repo. The port reads graphics, maps, text and so on s
 - Event blocks: exits, entering buildings and coming back out (return stack)
 - Exit landing positions verified against the real game
 
-Not yet: NPC movement and talking, event flags, text boxes, menus, battles, music,
-vehicles (the Talon), and overworld collision is inferred rather than emulator-checked.
+**Milestone 3 – talking** ✅
+- Full text/event bytecode: dictionary compression, all control-code lengths (every one of the
+  239 NPC texts parses exactly), flag branches, text calls, Yes/No prompts, item/spell names,
+  event-call shorthands
+- Dialogue window, typewriter, auto-scroll and speaker waits - pixel-identical to the real game
+- Talk to NPCs (they turn to face you) and special objects
+
+Not yet: most event commands (they're logged in the title bar), chests, shops, NPC movement,
+menus, battles, music, vehicles (the Talon), save data / real event-flag state, and overworld
+collision is inferred rather than emulator-checked.
 
 ## Building
 
@@ -40,12 +48,14 @@ It must be **Final Fantasy Legend III (U)**, MD5 `db156bc96b528996ce1bf771195171
 
 ```
 ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
-     [--walk UDLR...] [--shot out.bmp] [--debug] [--dump-blocks out.bin]   (headless/testing)
+     [--walk UDLRAW...] [--shot out.bmp] [--debug] [--dump-blocks out.bin]
+     [--text ID]                                                    (headless/testing)
 ```
 
 | Key | Action |
 |---|---|
 | Arrows / WASD | walk |
+| Z / Space / Enter | talk, advance text, confirm |
 | Tab | GB 160×144 ↔ widescreen 256×144 |
 | F1 | collision overlay (green walk, red solid, blue event) |
 | F2 | no-clip |
@@ -67,6 +77,8 @@ ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
   Build: `gcc -O2 -o cov cov.c` (needs `peanut_gb.h` from github.com/deltabeard/Peanut-GB)
 - `analyze.py`, `readers.py` – map coverage/data reads onto the disassembly's labels
 - `playthrough.txt` – input script for `cov` (title → intro → battle → town)
+- `ffl3text.py` – text/event bytecode parser; run it on the ROM to validate every NPC text
+- `talkcap.py` – make the real game show any NPC's text (rewrites an object in RAM) and capture it
 - `route.py`, `drive.py` – plan a route with the port's rules and drive the real game along it
   in `cov`, one step at a time, to get ground truth
 

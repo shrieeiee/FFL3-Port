@@ -96,3 +96,25 @@ Verified tile-for-tile against VRAM.
   $02 walkable 168/180 (rest were NPCs), $03 blocked 67/67.
 - Exits `06:6308[map]`, 4 bytes: region (row>>2, col>>2 nibbles; 64 px), dest map,
   dest row|facing, dest col|facing; leader lands at (row+5, col+5).
+
+## Dialogue & event bytecode (milestone 3)
+- A at an object (00:097f) dispatches on kind (byte 4 top bits): 0 talk -> `0A:4004[id-1]`,
+  1 chest (00:09d4, items 03:762A), 2 shop (0A:6FD4), 3 special (`0A:791E[id-1]`, e.g. Talon console).
+- Loop 00:3211: $00 end, $10 wait+end, < $88 control/dictionary (00:32cb, table 00:3175), >= $88 glyph.
+  Glyph byte = tile number of the shared font (03:4000 -> $8800). $AC , $AD ' $AE … $AF .
+  $EE/$EF quotes, $F0 : $F1 / $F2 - $F3 ! $F4 ?
+- Dictionary 03:71C5: 80 length-prefixed entries. $4E-$87 -> entries 0-57; the 22 low codes
+  listed at 00:30D1 -> entries 58-79. Entries can contain codes ($06, $1C $1F $00 ...).
+- Arg lengths: see tools/ffl3text.py ARGS. Validated: all 239 NPC texts parse to exactly the
+  start of the next text.
+- Refs (00:2ef6), 2 bytes lo,hi: hi < $40 event command hi (param lo -> wCA28, 00:1236);
+  $40-7F text in bank 9, $80-BF bank $A (hi|$40), $C0-FF bank 3 (hi&$7F).
+- $39 f A B (if flag), $3A f g A B C, $3C A B (Yes/No), $3E A, $36/$37 set/clear flag (wC760).
+- Shorthand event codes (0B:6C35/6C4C): $32->$26 $3D->$28 $3B->$27 $13->$1D $12->$1C
+  $3F->$1B $0A->$10 $0D->$0E $38->$12, next byte = param.
+- $1F n party member name; $2A n spell (< $30, 0E:6D9B x6) / item (0E:6EBB x8) name.
+- Window: WY=80, 20x8 tiles, frame $F7 $FC $F9 / $FB / $F8 $FC $FA, text rows 2,4,6 from col 1.
+  Full window scrolls by itself; $1C (before each new speaker) waits for A.
+  Verified: port's window = real game's frame, pixel for pixel (Float text).
+- Emulator trick (tools/talkcap.py): rewrite the Talon-console object (slot 10, wC20A/wC35A)
+  into any NPC id + kind 0, press A -> the real game shows that NPC's text.

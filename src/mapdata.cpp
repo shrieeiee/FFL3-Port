@@ -94,7 +94,7 @@ std::vector<MapObject> loadMapObjects(const Rom& rom, int map) {
         o.id = r[1];
         o.row = r[2] & 0x3f; o.flagsY = r[2] & 0xc0;
         o.col = r[3] & 0x3f; o.flagsX = r[3] & 0xc0;
-        o.move = r[4] & 0x1f; o.speed = r[4] >> 6;
+        o.move = r[4] & 0x1f; o.kind = r[4] >> 6;
         o.sprite = r[5];
         v.push_back(o);
     }
