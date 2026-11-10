@@ -42,3 +42,21 @@ Next, in order:
    then copy back (4B9F writes the party records). Replace the provisional rules.
 5. More recordings: magic (needs spells - poke didn't show them in the list), items,
    status effects, a party member dying, escape success/fail, wins with drops.
+
+## Command menus (Talent / Magic / Item) - findings so far
+- wCE00+4i = command index << 4 (0 Weapon, 1 Talent, 2 Magic, 3 Item) | low-nibble flags
+  (bit 0 = auto), +1 = list cursor memory (row*4+col), +2 = target, +3 = action id.
+  The command index is also the action-data type for 09:5466 (1 = 09:57BC talents,
+  2 = 09:5A50 spells, 3 = 09:5B70 items >= $C0, 0 = items via 09:55C4).
+- Lists: Talent = record +$48-4F (0B:6557, names via 1E8F), Magic = known spells from the
+  bits at +$6A (0B:6589, list via rst18 0C; MP check against wCE29 = cost from 09:5D87),
+  Item = the inventory at wC6FF (0B:6527; ids >= $C0 have their count taken here).
+- Usability / target: 0B:66EC takes wCE28 (from 09:5D87) -> wCE1D; 0 = can't use;
+  bit 7: bit 0 = choose, bit 2 = all (wCE1C = $81) ...; bit 7 clear: bit 3 = choose,
+  bit 4 = all enemies (wCE1C = $80), else no target. Which SIDE a choice starts on comes
+  from elsewhere (Cure1 and Fire items both have kind $28 but Cure1 starts on the party).
+  Target byte: 0-4 party member, 5+ enemy combatant, $80 | group+1 = whole group.
+- Recording these in the emulator is flaky: the game drops presses that arrive while a list
+  opens or a cursor blinks, so scripted key timing desyncs. Needs a closed-loop recorder
+  that waits for the menu state (e.g. wCDEA / cursor RAM) before each press.
+- Plan: port the 0B menu module (5BDF ... 6900) to C++ properly rather than guess.
