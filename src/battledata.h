@@ -77,6 +77,10 @@ EnemyLayout layoutEnemies(const Rom& rom, const Formation& f, bool fixed, const 
 // Returns the hFFCA value: formation index | $80 when the counts are fixed.
 int randomFormation(const Rom& rom, int area, int vehicle, int r);
 
+// The picture loader decompresses plane B of each group's picture into wD400; the monster
+// record builder never writes wD684 (record +4), so it keeps byte $284 of the last plane.
+uint8_t pictureResidue(const Rom& rom, const int ids[3], uint8_t before = 0xff);
+
 // 00:119A[(header byte 4) >> 5]: chance (out of 256) of a battle after each step.
 int encounterRate(const Rom& rom, int musicHi);
 

@@ -198,8 +198,246 @@ static void itemInfo5d87(BattleVM& vm, const Rom& rom) {
 }
 static void itemInfo(BattleVM& vm, const Rom& rom) { itemInfo5d87(vm, rom); vm.wr(0xce27, 0); }
 
+// ---- member records (0B:7349 / 0B:728B family) ---------------------------------------
+// 0B:73F4: address of field `off` in the record of member wCD36.
+static uint16_t recField(const BattleVM& vm, const Rom& rom, int off) {
+    return uint16_t(0xc500 + memberOffset(vm, rom) + off);
+}
+static void itemInfoWith(BattleVM& vm, const Rom& rom, uint8_t ce25) {   // 0B:73A2 / 73A7
+    const uint8_t keep = vm.rd(0xce25);
+    vm.wr(0xce25, ce25);
+    itemInfo(vm, rom);
+    vm.wr(0xce25, keep);
+}
+static void info73b1(BattleVM& vm, const Rom& rom) {
+    const uint8_t a = vm.rd(0xce26);
+    if (a >= 0x70) vm.wr(0xcedb, rom.b(0x0b, uint16_t(0x73c9 + (a - 0x70))));
+    else itemInfoWith(vm, rom, 1);
+}
+// 0B:7337 + 7403: OR the kind bits of the item in wCEDB into field `at` (3 bytes).
+static void orKind(BattleVM& vm, const Rom& rom, uint16_t at) {
+    vm.wr(at, uint8_t(vm.rd(at) | rom.b(0x0b, uint16_t(0x7104 + (vm.rd(0xcedb) >> 4)))));
+    const uint16_t hl = uint16_t(at + 1);
+    const uint8_t lo = vm.rd(0xcedb) & 0x0f, t = rom.b(0x0b, uint16_t(0x7114 + lo));
+    if (lo >= 0x0a) { vm.wr(hl, t); vm.wr(uint16_t(hl + 1), uint8_t(vm.rd(uint16_t(hl + 1)) | 0xe0)); }
+    else if (lo < 7) vm.wr(hl, uint8_t(vm.rd(hl) | t));
+    else vm.wr(uint16_t(hl + 1), uint8_t(vm.rd(uint16_t(hl + 1)) | t));
+}
+static void rec7349(BattleVM& vm, const Rom& rom) {
+    const uint16_t r58 = recField(vm, rom, 0x58);
+    vm.wr(r58, 0);
+    for (int i = 0; i < 8; i++) {
+        const uint8_t a = vm.rd(recField(vm, rom, 0x48 + i));
+        if (a < 0x86 || a >= 0x90) continue;
+        vm.wr(0xce26, a);
+        info73b1(vm, rom);
+        vm.wr(r58, uint8_t(vm.rd(r58) | rom.b(0x0b, uint16_t(0x7104 + (vm.rd(0xcedb) >> 4)))));
+    }
+}
+static void rec72e1(BattleVM& vm, const Rom& rom) {
+    const uint16_t f = recField(vm, rom, 0x36);
+    gbFill(vm, f, 0, 3);
+    for (int i = 0; i < 7; i++) {
+        const uint8_t a = vm.rd(uint16_t(f + 0x0b + i));
+        if (a == 0xff) continue;
+        vm.wr(0xce26, a);
+        itemInfoWith(vm, rom, 0);
+        orKind(vm, rom, f);
+    }
+}
+static void rec7305(BattleVM& vm, const Rom& rom) {
+    const uint16_t f = recField(vm, rom, 0x39);
+    gbFill(vm, f, 0, 3);
+    for (int i = 0; i < 8; i++) {
+        const uint8_t a = vm.rd(uint16_t(f + 0x0f + i));
+        if (a < 0x70 || a >= 0x86) continue;
+        vm.wr(0xce26, a);
+        info73b1(vm, rom);
+        orKind(vm, rom, f);
+    }
+}
+static void rec7422(BattleVM& vm, const Rom& rom) {
+    const uint16_t f = recField(vm, rom, 0x3d);
+    gbFill(vm, f, 0, 3);
+    const uint8_t keep = vm.rd(0xce26);
+    for (int i = 0; i < 7; i++) {
+        const uint8_t a = vm.rd(recField(vm, rom, 0x41 + i));
+        if (a == 0xff) continue;
+        vm.wr(0xce26, a);
+        itemInfoWith(vm, rom, 0);
+        vm.wr(f, uint8_t(vm.rd(f) + (vm.rd(0xcedd) >> 4)));
+        vm.wr(uint16_t(f + 1), uint8_t(vm.rd(uint16_t(f + 1)) + (vm.rd(0xcedc) & 0x0f)));
+        vm.wr(uint16_t(f + 2), uint8_t(vm.rd(uint16_t(f + 2)) + (vm.rd(0xcedd) & 0x0f)));
+    }
+    vm.wr(0xce26, keep);
+    itemInfoWith(vm, rom, 0);
+}
+static void rec728b(BattleVM& vm, const Rom& rom) {
+    rec72e1(vm, rom);
+    rec7305(vm, rom);
+    if ((vm.rd(recField(vm, rom, 0x0d)) & 7) != 4) {
+        rec7422(vm, rom);
+        for (int i = 0; i < 3; i++) {                                  // 72C0
+            const uint16_t a = recField(vm, rom, 0x39 + i);
+            vm.wr(a, uint8_t(vm.rd(a) | vm.rd(recField(vm, rom, 0x36 + i))));
+        }
+    }
+    const uint16_t r1 = recField(vm, rom, 0x01);
+    vm.wr(r1, uint8_t(vm.rd(r1) & ~vm.rd(recField(vm, rom, 0x3a))));
+    const uint16_t r58 = recField(vm, rom, 0x58);
+    vm.wr(r58, uint8_t(vm.rd(r58) & (~vm.rd(recField(vm, rom, 0x39)) | 0x0f)));
+}
+
+// 0B:6E74: member wCD36 learns spell bit wCE94 (16-bit words at record +$51)
+static void learnBit(BattleVM& vm, const Rom& rom) {
+    const uint8_t n = vm.rd(0xce94);
+    const uint16_t hl = uint16_t(memberOffset(vm, rom) + 0xc551 + 2 * (n / 16));
+    uint16_t w = uint16_t(vm.rd(hl) << 8 | vm.rd(uint16_t(hl + 1)));    // d:e
+    const int b = n % 16;
+    auto rot = [&](int k) { for (int i = 0; i < k; i++) w = uint16_t(w >> 1 | (w & 1) << 15); };
+    rot(b);
+    w |= 1;
+    rot(16 - b);
+    vm.wr(uint16_t(hl + 1), uint8_t(w));
+    vm.wr(hl, uint8_t(w >> 8));
+}
+
+// ---- monster record at wD680 (0B:451C / 4526 / 453A / 45CB / 466B) --------------------
+static void scaleHp(BattleVM& vm, uint16_t de) {                    // 0B:45AB (de -> hi byte)
+    uint16_t hl = uint16_t(vm.rd(uint16_t(de - 1)) | vm.rd(de) << 8);
+    if (vm.rd(0xd68e) >= 0xbb) {
+        hl = uint16_t(hl << 4);
+        vm.wr(uint16_t(de - 1), uint8_t(hl)); vm.wr(de, uint8_t(hl >> 8));
+    }
+    vm.wr(uint16_t(de + 1), uint8_t(hl)); vm.wr(uint16_t(de + 2), uint8_t(hl >> 8));
+}
+static void monsterStats(BattleVM& vm, const Rom& rom) {              // 0B:453A
+    const uint8_t id = vm.rd(0xcc70);
+    vm.wr(0xd68e, id);
+    uint16_t hl = uint16_t(0x4a19 + id * 12);
+    auto r = [&]() { return rom.b(0x0b, hl++); };
+    vm.wr(0xd68d, r() & 7);
+    vm.wr(0xd690, r());
+    uint8_t a = r(); vm.wr(0xcc73, a); vm.wr(0xd691, a & 0x0f); scaleHp(vm, 0xd691);
+    vm.wr(0xd694, r());
+    a = r(); vm.wr(0xcc74, a); vm.wr(0xd695, a & 0x0f); scaleHp(vm, 0xd695);
+    for (int i = 0; i < 4; i++) { const uint8_t v = rom.b(0x0b, uint16_t(hl + i)); vm.wr(uint16_t(0xd698 + i), v); vm.wr(uint16_t(0xd6f0 + i), v); }
+    hl = uint16_t(hl + 4);
+    for (int i = 0; i < 3; i++) vm.wr(uint16_t(0xd6bd + i), r());
+    const uint16_t t1 = uint16_t(0x469d + ((vm.rd(0xcc73) & 0xf0) >> 2));
+    for (int i = 0; i < 4; i++) vm.wr(uint16_t(0xd6d9 + i), rom.b(0x0b, uint16_t(t1 + i)));
+    const uint16_t t2 = uint16_t(0x46dd + ((vm.rd(0xcc74) >> 4) & 0x0f) * 3);
+    for (int i = 0; i < 3; i++) vm.wr(uint16_t(0xd6dd + i), rom.b(0x0b, uint16_t(t2 + i)));
+}
+static void monsterRest(BattleVM& vm, const Rom& rom) {               // 0B:45CB
+    vm.wr(0xd680, 0x0f); vm.wr(0xd681, 0); vm.wr(0xd682, 0);
+    gbFill(vm, 0xd6d1, 0, 6);
+    gbFill(vm, 0xd6ea, 0, 6);
+    const uint8_t id = vm.rd(0xcc70);
+    uint16_t hl = uint16_t(0x533d + id * 9), de = 0xd6c8;
+    uint8_t b = rom.b(0x0b, hl++);
+    for (int c = 8; c > 0; c--) {
+        const uint8_t a = rom.b(0x0b, hl);
+        const bool bit = b & 0x80;
+        b = uint8_t(b << 1);
+        if (a == 0xff) continue;
+        if (bit) { vm.wr(de++, a); hl++; continue; }
+        hl++;
+        if (a >= 0x30) vm.wr(0xd6c0, a);
+        else { vm.wr(0xce94, a); vm.wr(0xcd36, 0x0d); learnBit(vm, rom); }
+    }
+    vm.wr(0xcd36, 0x0d);
+    rec7349(vm, rom);
+    rec728b(vm, rom);
+    hl = uint16_t(0x470d + id * 4);
+    const uint8_t d0 = rom.b(0x0b, hl++);
+    vm.wr(0xd683, d0 & 0x3f);
+    vm.wr(0xd68f, d0 >> 6); vm.wr(0xd6e8, d0 >> 6);
+    vm.wr(0xd6d7, uint8_t((uint8_t(vm.rd(0xd69a) + (d0 & 0x3f)) >> 1) + 0x4b));
+    for (int i = 0; i < 3; i++) vm.wr(uint16_t(0xd6e5 + i), rom.b(0x0b, uint16_t(hl + i)));
+}
+static void monsterNew(BattleVM& vm, const Rom& rom) {                // 0B:4526
+    gbFill(vm, 0xd690, 0xff, 0x70);
+    const uint8_t id = vm.rd(0xcc70);
+    for (int i = 0; i < 8; i++) vm.wr(uint16_t(0xd685 + i), rom.b(0x0e, uint16_t(0x7533 + id * 8 + i)));
+    monsterStats(vm, rom);
+}
+static void monster466b(BattleVM& vm) {
+    uint16_t hl = 0xd6c8;
+    for (int b = 8; b > 0; b--) {
+        uint16_t de = hl;
+        const uint8_t a = vm.rd(hl++);
+        if (a != 0x6a) continue;
+        uint16_t src = hl;
+        gbCopy(vm, src, de, b - 1);
+        vm.wr(de, 0xff);
+    }
+}
+// 0B:708B: spell bits from items (record +$51-56 -> +$6A..) for combatants 0..11
+static void spellBits(BattleVM& vm, const Rom& rom) {
+    for (int m = 0; m <= 12; m++) {
+        vm.wr(0xcd36, uint8_t(m));
+        const uint16_t base = uint16_t(0xc500 + rom.b(0, uint16_t((vm.rd(0xcd37) ? 0x1fed : 0x1fe3))) +
+                                       (rom.b(0, uint16_t((vm.rd(0xcd37) ? 0x1fed : 0x1fe3) + 1)) << 8) + m * 0x80 + 0x51);
+        int c = 0;
+        static const int order[6] = {1, 0, 3, 2, 5, 4};
+        for (int k : order) {
+            const uint16_t at = uint16_t(base + k);
+            for (int bit = 0; bit < 8; bit++, c++) {
+                const uint8_t v = vm.rd(at);
+                vm.wr(at, uint8_t(v >> 1 | v << 7));                    // rrc [hl]
+                if (!(v & 1)) continue;
+                const uint8_t t = rom.b(0x0b, uint16_t(0x7543 + c));
+                const uint16_t h = uint16_t(memberOffset(vm, rom) + 0xc56a + (t >> 3));
+                vm.wr(h, uint8_t(vm.rd(h) | (1 << (7 - (t & 7)))));
+                if (!(t >> 3)) vm.wr(h, vm.rd(h) & 0x1f);
+            }
+        }
+    }
+    vm.wr(0xcd36, 0x0c);
+}
+
+void battleSetupCombatants(BattleVM& vm, const Rom& rom) {
+    gbFill(vm, 0xd000, 0xff, 0x680);
+    for (int i = 0; i < 5; i++) {
+        if (vm.rd(uint16_t(0xc503 + i * 0x60)) == 0xff) continue;
+        uint16_t hl = uint16_t(0xc500 + i * 0x60), de = uint16_t(0xd000 + i * 0x80);
+        gbCopy(vm, hl, de, 0x60);
+    }
+    for (int i = 0; i < 5; i++) {
+        if (vm.rd(uint16_t(0xc518 + i * 0x60)) == 0xff) continue;
+        uint16_t hl = uint16_t(0xc518 + i * 0x60), de = uint16_t(0xd070 + i * 0x80);
+        gbCopy(vm, hl, de, 4);
+    }
+    for (int i = 0; i < 5; i++) gbFill(vm, uint16_t(0xd06a + i * 0x80), 0, 6);
+    uint16_t de = 0xd280;
+    for (int g = 0; g < 3; g++) {
+        const int n = vm.rd(uint16_t(0xcc36 + g));
+        if (g && !n) continue;
+        vm.wr(0xcc70, vm.rd(uint16_t(0xcc59 + g)));
+        monsterNew(vm, rom);
+        monsterRest(vm, rom);
+        for (int k = 0; k < (n ? n : 256); k++) { uint16_t hl = 0xd680; gbCopy(vm, hl, de, 0x80); }
+        vm.wr(0xcc71, uint8_t(de)); vm.wr(0xcc72, uint8_t(de >> 8));
+    }
+    spellBits(vm, rom);
+}
+
 bool runLogicNative(BattleVM& vm, const Rom& rom, uint16_t addr) {
     switch (addr) {
+    case 0x6b25:                          // 0B:44F0: monster wC91B into wD680
+        vm.wr(0xcc70, vm.rd(0xc91b));
+        gbFill(vm, 0xd690, 0xff, 0x70);
+        monsterStats(vm, rom);
+        monsterRest(vm, rom);
+        monster466b(vm);
+        return true;
+    case 0x6b28:
+        vm.wr(0xcc70, vm.rd(0xc91b));
+        gbFill(vm, 0xd690, 0xff, 0x70);
+        monsterStats(vm, rom);
+        return true;
+    case 0x6b44: rec7349(vm, rom); rec728b(vm, rom); return true;
     case 0x6b64: itemInfo(vm, rom); return true;
     case 0x6b61: {                        // 09:5D64: the item in the member's first slot
         vm.wr(0xce25, 0); vm.wr(0xce27, 0);

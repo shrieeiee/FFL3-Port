@@ -4,6 +4,7 @@
 // usage: vmreplay rom.gb enter.mem replay.txt
 #include "../src/battlevm.h"
 #include "../src/battlenatives.h"
+#include "../src/battledata.h"
 #include <map>
 #include <set>
 #include <cstdio>
@@ -44,6 +45,20 @@ int main(int argc, char** argv) {
         }
     }
     std::fclose(f);
+    if (std::getenv("SETUP")) {               // rebuild the combatant table and compare
+        BattleVM t = vm;
+        for (int a = 0xd000; a < 0xd700; a++) t.mem[size_t(a)] = 0x5a;
+        const int ids[3] = {vm.mem[0xcc59], vm.mem[0xcc5a], vm.mem[0xcc5b]};
+        t.mem[0xd684] = pictureResidue(rom, ids);
+        battleSetupCombatants(t, rom);
+        int diffs = 0;
+        for (int a = 0xc000; a < 0xe000; a++)
+            if (t.mem[size_t(a)] != vm.mem[size_t(a)] && !(a >= 0xce25 && a <= 0xce29) && !(a >= 0xcedb && a <= 0xcee1)) {
+                if (diffs++ < 40) std::printf(" %04x port %02x game %02x\n", a, t.mem[size_t(a)], vm.mem[size_t(a)]);
+            }
+        std::printf("setup: %d bytes differ\n", diffs);
+        return diffs ? 1 : 0;
+    }
     const size_t total = steps.size();
     vm.start(steps.empty() ? 0x4a2d : steps.front());
     bool bad = false;

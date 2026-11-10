@@ -172,6 +172,18 @@ int randomFormation(const Rom& rom, int area, int vehicle, int r) {
     return rom.b(3, uint16_t(0x76c2 + pack * 7 + c));
 }
 
+uint8_t pictureResidue(const Rom& rom, const int ids[3], uint8_t before) {
+    uint8_t v = before;
+    for (int g = 0; g < 3; g++) {
+        if (ids[g] == 0xff) continue;
+        const int meta = rom.b(0xb, uint16_t(0x4301 + ids[g])) >> 3;
+        const int bank = rom.b(0xb, uint16_t(0x43cc + meta)) >> 4;
+        const auto b = rom.decompress(bank, rom.w(0xb, uint16_t(0x43e6 + meta * 4)), rom.w(0xb, uint16_t(0x43e8 + meta * 4)));
+        if (b.size() > 0x284) v = b[0x284];
+    }
+    return v;
+}
+
 int encounterRate(const Rom& rom, int musicHi) { return rom.b(0, uint16_t(0x119a + (musicHi & 7))); }
 
 } // namespace ffl3
