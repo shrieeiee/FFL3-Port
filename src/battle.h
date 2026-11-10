@@ -68,7 +68,7 @@ public:
     std::vector<uint16_t> unknownNatives;    // natives not handled yet (logged, skipped)
 
 private:
-    enum class State { Intro, Vm, FightMenu, Command, Target, Message, Wait, Done };
+    enum class State { Intro, Vm, FightMenu, Command, List, Target, Message, Wait, Done };
 
     uint8_t m(uint16_t a) const { return vm_.mem[a]; }
     int word(uint16_t a) const { return vm_.mem[a] | vm_.mem[uint16_t(a + 1)] << 8; }
@@ -100,8 +100,20 @@ private:
     std::vector<Monster> groups_;
     State state_ = State::Intro;
     Result result_ = Result::None;
-    int timer_ = 0, cursor_ = 0, member_ = 0, targetGroup_ = 0;
+    int timer_ = 0, cursor_ = 0, member_ = 0;
     bool cmdSet_[4] = {};
+    int cmdKind_[4] = {};                    // command chosen per member (for the "Weap" label)
+    // list + target selection (0B:6527 / 6557 / 6589, 0B:670D-6B00)
+    struct Entry { uint8_t id; int count; int slot; };
+    std::vector<Entry> list_;
+    int listCursor_ = 0, command_ = 0;
+    uint8_t chosenId_ = 0xff, kind_ = 0, target_ = 0xff;
+    int errorTimer_ = 0;
+    void openList(int command);
+    bool beginTarget(uint8_t kind);          // false: can't be used
+    void moveTarget(int dx, int dy);
+    void confirmTarget();
+    uint8_t itemKind(uint8_t id, uint8_t ce25, uint8_t ce27);
     std::vector<Glyphs> lines_;              // message window: finished lines
     std::deque<uint8_t> pending_;            // glyphs still to type ($FE = newline)
     Glyphs cur_;

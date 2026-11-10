@@ -339,36 +339,152 @@ void Battle::tick(const BattleInput& in) {
             else { member_ = k; cmdSet_[k] = false; cursor_ = 0; }
             return;
         }
-        if (in.a && cursor_ == 0) {                    // Weapon (Talent/Magic/Item: next)
-            state_ = State::Target;
-            const auto g = aliveGroups();
-            targetGroup_ = g.empty() ? 0 : g[0];
+        if (in.a) {
+            command_ = cursor_;
+            if (command_ == 0) {                       // Weapon: the slot-0 weapon, id $FF
+                chosenId_ = 0xff;
+                const uint8_t w = m(uint16_t(0xd040 + member_ * 0x80));
+                const uint8_t k = w == 0xff ? 0x81 : itemKind(w, 0, 0);
+                if (!beginTarget(k ? k : 0x81)) confirmTarget();
+            } else {
+                openList(command_);
+            }
         }
         return;
-    case State::Target: {
-        const auto g = aliveGroups();
-        if (g.empty()) return;
-        auto it = std::find(g.begin(), g.end(), targetGroup_);
-        size_t k = it == g.end() ? 0 : size_t(it - g.begin());
-        if (in.left || in.up) k = (k + g.size() - 1) % g.size();
-        if (in.right || in.down) k = (k + 1) % g.size();
-        targetGroup_ = g[k];
+    case State::List: {
+        if (errorTimer_ > 0) { errorTimer_--; return; }
+        if (list_.empty()) { if (in.a || in.b) state_ = State::Command; return; }
+        if (in.up) listCursor_ = (listCursor_ + int(list_.size()) - 1) % int(list_.size());
+        if (in.down) listCursor_ = (listCursor_ + 1) % int(list_.size());
         if (in.b) { state_ = State::Command; return; }
-        if (in.a) {
-            setCmd(member_, firstSlot(targetGroup_));
-            cmdSet_[member_] = true;
-            int n = member_ + 1;
-            while (n < 4 && !memberAlive(n)) n++;
-            if (n >= 4) {
-                if (memberAlive(4)) setCmd(4, firstSlot(g[0]));   // the guest acts on its own
-                finishCommands(false);
-            } else { member_ = n; state_ = State::Command; cursor_ = 0; }
+        if (!in.a) return;
+        const Entry& e = list_[size_t(listCursor_)];
+        chosenId_ = e.id;
+        uint8_t k;
+        if (command_ == 1) k = itemKind(e.id, 1, 0);                      // 0B:6557
+        else if (command_ == 3) k = itemKind(e.id, 0, 1);                 // 0B:6527
+        else {                                                            // 0B:6589
+            k = itemKind(e.id, 0, 0);
+            const uint16_t r = uint16_t(0xd000 + member_ * 0x80);
+            if (!m(uint16_t(r + 0x15)) && m(uint16_t(r + 0x14)) < m(0xce29)) { errorTimer_ = 30; return; }   // not enough MP
         }
+        if (!k) { errorTimer_ = 20; return; }                             // can't use it here (1E83)
+        if (!beginTarget(k)) confirmTarget();
+        return;
+    }
+    case State::Target: {
+        if (in.b) { state_ = command_ ? State::List : State::Command; return; }
+        if (in.left) moveTarget(-1, 0);
+        if (in.right) moveTarget(1, 0);
+        if (in.up) moveTarget(0, -1);
+        if (in.down) moveTarget(0, 1);
+        if (in.a) confirmTarget();
         return;
     }
     case State::Done:
         return;
     }
+}
+
+// What 09:5D87 says about an item/spell/talent: wCE28, the use kind (0 = can't be used).
+uint8_t Battle::itemKind(uint8_t id, uint8_t ce25, uint8_t ce27) {
+    vm_.mem[0xce26] = id; vm_.mem[0xce25] = ce25; vm_.mem[0xce27] = ce27;
+    vm_.mem[0xcd36] = uint8_t(member_);
+    runLogicNative(vm_, rom_, 0x6b64);
+    return m(0xce28);
+}
+
+void Battle::openList(int command) {
+    list_.clear();
+    listCursor_ = 0;
+    const uint16_t r = uint16_t(0xd000 + member_ * 0x80);
+    if (command == 1) {                                   // talents: record +$48-4F
+        for (int i = 0; i < 8; i++) { const uint8_t id = m(uint16_t(r + 0x48 + i)); if (id != 0xff) list_.push_back({id, -1, i}); }
+    } else if (command == 2) {                            // spells: bits at +$51-56 (09:51EA)
+        for (int k = 0; k < 6; k++)
+            for (int bit = 0; bit < 8; bit++)
+                if (m(uint16_t(r + 0x51 + k)) & (0x80 >> bit)) list_.push_back({uint8_t((k ^ 1) * 8 + 7 - bit), -1, -1});
+    } else {                                              // inventory wC6FF
+        for (int i = 0; i < 24; i++) {
+            const uint8_t id = m(uint16_t(0xc6ff + i * 2));
+            if (id != 0xff) list_.push_back({id, m(uint16_t(0xc700 + i * 2)), i});
+        }
+    }
+    state_ = State::List;
+}
+
+// 0B:670D / 6718: where the cursor starts. Returns false when the action takes no target.
+bool Battle::beginTarget(uint8_t kind) {
+    kind_ = kind;
+    if (kind & 0x80) {
+        target_ = 0xff;
+        for (size_t s = 0; s < layout_.slots.size(); s++) if (enemyAlive(int(s))) { target_ = uint8_t(5 + s); break; }
+        if (kind & 1) {}
+        else if (kind & 4) { const auto g = aliveGroups(); target_ = uint8_t(0x81 + (g.empty() ? 0 : g[0])); }
+        else { target_ = 0xff; return false; }
+    } else {
+        target_ = 0;
+        if (kind & 8) {}
+        else if (kind & 0x10) target_ = 0x80;
+        else { target_ = 0xff; return false; }
+    }
+    state_ = State::Target;
+    return true;
+}
+
+void Battle::moveTarget(int dx, int dy) {
+    if (target_ < 5) {                                    // a party member (0B:698D)
+        int t = target_;
+        if (dy > 0) {
+            if (t >= 2) { if (kind_ & 0x10) target_ = 0x80; else errorTimer_ = 10; return; }
+            t += 2;
+        } else if (dy < 0) { t = t >= 2 && t < 4 ? t - 2 : t == 4 ? 2 : t; }
+        else if (dx) t = t < 4 ? (t ^ 1) : t;
+        if (memberAlive(t) || m(uint16_t(0xd003 + t * 0x80)) != 0xff) target_ = uint8_t(t);
+    } else if (target_ == 0x80) {
+        if (dy < 0) target_ = 0;
+    } else if (target_ & 0x80) {                          // enemy group
+        const auto g = aliveGroups();
+        if (g.empty()) return;
+        auto it = std::find(g.begin(), g.end(), int(target_ & 0x0f) - 1);
+        size_t k = it == g.end() ? 0 : size_t(it - g.begin());
+        k = (k + g.size() + (dx + dy > 0 ? 1 : -1)) % g.size();
+        target_ = uint8_t(0x81 + g[k]);
+    } else {                                              // one enemy
+        std::vector<int> alive;
+        for (size_t s = 0; s < layout_.slots.size(); s++) if (enemyAlive(int(s))) alive.push_back(int(5 + s));
+        if (alive.empty()) return;
+        auto it = std::find(alive.begin(), alive.end(), int(target_));
+        size_t k = it == alive.end() ? 0 : size_t(it - alive.begin());
+        k = (k + alive.size() + (dx + dy > 0 ? 1 : -1)) % alive.size();
+        target_ = uint8_t(alive[k]);
+    }
+}
+
+// Store the command (wCE00 + 4i: command << 4, 0, target, id) and go to the next member.
+void Battle::confirmTarget() {
+    const uint16_t e = uint16_t(0xce00 + member_ * 4);
+    vm_.mem[e] = uint8_t(command_ << 4);
+    vm_.mem[uint16_t(e + 1)] = 0;
+    vm_.mem[uint16_t(e + 2)] = target_;
+    vm_.mem[uint16_t(e + 3)] = chosenId_;
+    if (command_ == 3 && chosenId_ >= 0xc0)               // 0B:6527: battle items are used up here
+        for (int i = 0; i < 24; i++)
+            if (m(uint16_t(0xc6ff + i * 2)) == chosenId_) { vm_.mem[uint16_t(0xc700 + i * 2)]--; break; }
+    cmdSet_[member_] = true;
+    cmdKind_[member_] = command_;
+    int n = member_ + 1;
+    while (n < 4 && !memberAlive(n)) n++;
+    if (n < 4) { member_ = n; state_ = State::Command; cursor_ = 0; return; }
+    if (memberAlive(4)) {                                 // the guest acts on its own
+        for (size_t s = 0; s < layout_.slots.size(); s++)
+            if (enemyAlive(int(s))) {
+                const uint16_t g = 0xce10;
+                vm_.mem[g] = 0; vm_.mem[g + 1] = 0; vm_.mem[g + 2] = uint8_t(5 + s); vm_.mem[g + 3] = 0xff;
+                break;
+            }
+    }
+    finishCommands(false);
 }
 
 // ---- view ------------------------------------------------------------------------------
@@ -406,7 +522,8 @@ void Battle::statusPanel(BattleView& v, int hideCol) const {
         putNum(v.win, x0 + 3, y0, word(uint16_t(r + 0x10)), 3);
         putNum(v.win, x0 + 3, y0 + 1, word(uint16_t(r + 0x14)), 3);
         if (i < 4 && cmdSet_[i]) {
-            putText(v.win, x0 + 6, y0 + 1, G("Weap"));
+            static const char* kShort[4] = {"Weap", "Tale", "Magi", "Item"};
+            putText(v.win, x0 + 6, y0 + 1, G(kShort[cmdKind_[i] & 3]));
         } else {
             v.win[size_t(y0 * 20 + x0 + 6)] = 0xf1;
             putNum(v.win, x0 + 7, y0, word(uint16_t(r + 0x12)), 3);
@@ -457,15 +574,34 @@ BattleView Battle::view() const {
     case State::Target: {
         v.wy = 64;
         statusPanel(v, -1);
-        int x0 = 160, x1 = 0, y0 = 64, y1 = 0;
-        for (size_t s = 0; s < layout_.slots.size(); s++) {
+        int x0 = 160, x1 = 0, y0 = 144, y1 = 0;
+        auto addRect = [&](int ax, int ay, int bx, int by) { x0 = std::min(x0, ax); y0 = std::min(y0, ay); x1 = std::max(x1, bx); y1 = std::max(y1, by); };
+        auto addSlot = [&](size_t s) {
             const EnemySlot& e = layout_.slots[s];
-            if (e.group != targetGroup_ || !enemyAlive(int(s))) continue;
             const Monster& mo = groups_[size_t(e.group)];
-            x0 = std::min(x0, e.col * 8); x1 = std::max(x1, (e.col + mo.picW) * 8);
-            y0 = std::min(y0, e.row * 8); y1 = std::max(y1, (e.row + mo.picH) * 8);
-        }
+            addRect(e.col * 8, e.row * 8, (e.col + mo.picW) * 8, (e.row + mo.picH) * 8);
+        };
+        auto addMember = [&](int i) {
+            const int px = i == 4 ? 8 : (i & 1) ? 80 : 8, py = 64 + 8 + (i == 4 ? 48 : (i >> 1) * 24);
+            addRect(px, py - 8, px + 16, py + 24);
+        };
+        if (target_ < 5) addMember(target_);
+        else if (target_ == 0x80) for (int i = 0; i < 5; i++) { if (memberAlive(i)) addMember(i); }
+        else if (target_ & 0x80) { for (size_t s = 0; s < layout_.slots.size(); s++) if (layout_.slots[s].group == (target_ & 0x0f) - 1 && enemyAlive(int(s))) addSlot(s); }
+        else if (target_ >= 5 && size_t(target_ - 5) < layout_.slots.size()) addSlot(size_t(target_ - 5));
         if (x1 > x0) brackets(x0, y0, x1, y1);
+        break;
+    }
+    case State::List: {                                // 0B list window: name, count / MP
+        v.wy = 64;
+        box(v.win, 0, 0, 20, 10);
+        const int first = std::max(0, std::min(listCursor_ - 3, int(list_.size()) - 4));
+        for (int i = 0; i < 4 && first + i < int(list_.size()); i++) {
+            const Entry& e = list_[size_t(first + i)];
+            putText(v.win, 2, 2 + i * 2, itemName(rom_, e.id));
+            if (e.count >= 0) putNum(v.win, 15, 2 + i * 2, e.count, 2);
+        }
+        if (!list_.empty()) v.objs.push_back({8, 64 + 16 + (listCursor_ - first) * 16, kCursor});
         break;
     }
     case State::Vm: case State::Message: case State::Wait: {

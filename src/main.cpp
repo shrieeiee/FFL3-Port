@@ -97,7 +97,7 @@ int dirFromChar(char c) {
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk;
     int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
-    std::string keys, dumpView;
+    std::string keys, dumpView, ramPokes;
     int mapId = -1, scale = 5, startRow = -1, startCol = -1;
     bool wide = false, debug = false, showSlots = false;
     for (int i = 1; i < argc; i++) {
@@ -111,6 +111,7 @@ int main(int argc, char** argv) {
         else if (a == "--battle" && i + 1 < argc) battleArg = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--keys" && i + 1 < argc) keys = argv[++i];
         else if (a == "--dump-view" && i + 1 < argc) dumpView = argv[++i];
+        else if (a == "--ram" && i + 1 < argc) ramPokes = argv[++i];     // ADDR:VAL,... into battle RAM
         else if (a == "--shot-at" && i + 1 < argc) shotAt = std::atoi(argv[++i]);
         else if (a == "--dump-blocks" && i + 1 < argc) dumpTiles = argv[++i];
         else if (a == "--scale" && i + 1 < argc) scale = std::max(1, std::atoi(argv[++i]));
@@ -207,6 +208,17 @@ int main(int argc, char** argv) {
     //   A B U D L R = press (then 4 frames), W = 30 frames, * = mash A until the battle ends.
     //   --shot out.bmp saves the screen when the script ends (or at frame --shot-at N).
     if (battleArg >= 0) {
+        for (size_t p = 0; p < ramPokes.size();) {
+            unsigned a, v;
+            if (std::sscanf(ramPokes.c_str() + p, "%x:%x", &a, &v) == 2) {
+                battleRam[a & 0xffff] = uint8_t(v);
+                if (a >= 0xc500 && a < 0xc6e0 && (a - 0xc500) / 0x60 < party.size())   // party records
+                    party[(a - 0xc500) / 0x60].raw[(a - 0xc500) % 0x60] = uint8_t(v);
+            }
+            const size_t c = ramPokes.find(',', p);
+            if (c == std::string::npos) break;
+            p = c + 1;
+        }
         field.startBattle(battleArg);
         int frameNo = 0;
         bool shotDone = false;
