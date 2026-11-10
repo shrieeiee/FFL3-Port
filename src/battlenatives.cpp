@@ -81,8 +81,170 @@ static void actionData(BattleVM& vm, const Rom& rom) {
     }
 }
 
+// Read through a bank mapping: $0000-3FFF bank 0, $4000-7FFF `bank`, RAM above.
+static uint8_t rdb(const BattleVM& vm, const Rom& rom, int bank, uint16_t a) {
+    if (a < 0x4000) return rom.b(0, a);
+    if (a < 0x8000) return rom.b(bank, a);
+    return vm.rd(a);
+}
+
+// 0B:6EB6: lowest / highest set bit of [hl] (+5 = combatant slot) -> wCE8F / wCE90
+static void bitRange(BattleVM& vm, uint16_t hl) {
+    const uint8_t c = vm.rd(hl);
+    int lo = 0, hi = 7;
+    if (c) {
+        while (!(c & (1 << lo))) lo++;
+        while (!(c & (1 << hi))) hi--;
+    }
+    vm.wr(0xce8f, uint8_t(lo + 5));
+    vm.wr(0xce90, uint8_t(hi + 5));
+}
+
+// Inventory: 24 (id, count) pairs at wC6FF.
+static void inventoryTake(BattleVM& vm) {          // 0B:706C: use up item wCE91
+    for (int i = 0; i < 24; i++) {
+        const uint16_t hl = uint16_t(0xc6ff + i * 2);
+        if (vm.rd(hl) != vm.rd(0xce91)) continue;
+        if (!vm.rd(uint16_t(hl + 1))) break;
+        vm.wr(uint16_t(hl + 1), uint8_t(vm.rd(uint16_t(hl + 1)) - 1));
+        return;
+    }
+    vm.wr(0xce91, 0xff);
+}
+
+static void inventoryAdd(BattleVM& vm) {           // 0B:7037: add item wCE94 (max 9 each)
+    const uint8_t id = vm.rd(0xce94);
+    for (int i = 0; i < 24; i++) {
+        const uint16_t hl = uint16_t(0xc6ff + i * 2);
+        if (vm.rd(hl) != id) continue;
+        if (vm.rd(uint16_t(hl + 1)) >= 9) { vm.wr(0xce94, 0xff); return; }
+        vm.wr(uint16_t(hl + 1), uint8_t(vm.rd(uint16_t(hl + 1)) + 1));
+        return;
+    }
+    for (int i = 0; i < 24; i++) {
+        const uint16_t hl = uint16_t(0xc6ff + i * 2);
+        if (vm.rd(hl) == 0xff) { vm.wr(hl, id); vm.wr(uint16_t(hl + 1), 1); return; }
+    }
+    vm.wr(0xce94, 0xff);
+}
+
+// 00:1FC4: offset of the record of member wCD36 (party records, or battle records if wCD37)
+static uint16_t memberOffset(const BattleVM& vm, const Rom& rom) {
+    uint8_t a = vm.rd(0xcd36);
+    if (a >= 0x80) a = uint8_t(a - 0x7b);
+    const uint16_t t = uint16_t((vm.rd(0xcd37) ? 0x1fed : 0x1fe3) + uint8_t(a * 2));
+    return uint16_t(rom.b(0, t) | rom.b(0, uint16_t(t + 1)) << 8);
+}
+
+// 09:5D7F / 09:5D87: what the item / spell / talent wCE26 is, for menus and the VM:
+// copies its 7 data bytes to wCEDB and sets wCE28 (use kind) / wCE29.
+static void copyRecord(BattleVM& vm, const Rom& rom, uint16_t src) {
+    for (int i = 0; i < 7; i++) vm.wr(uint16_t(0xcedb + i), rom.b(9, uint16_t(src + i)));
+}
+static void itemInfo(BattleVM& vm, const Rom& rom);
+static void itemInfo5d87(BattleVM& vm, const Rom& rom) {
+    vm.wr(0xce28, 0); vm.wr(0xce29, 0);
+    const uint8_t a = vm.rd(0xce26);
+    if (a == 0xff) return;
+    if (vm.rd(0xce25)) {                                       // 5DC4
+        if (a >= 0x6e) return;
+        copyRecord(vm, rom, uint16_t(0x57bc + a * 6));
+        vm.wr(0xce28, vm.rd(0xcee0));
+        return;
+    }
+    if (a < 0x30) {                                            // 5E3D: spells
+        copyRecord(vm, rom, uint16_t(0x5a50 + a * 6));
+        if (vm.rd(0xce27)) return;
+        vm.wr(0xce28, vm.rd(0xcee0));
+        uint8_t v = uint8_t((((a >> 1) | (a << 7)) & 7) * 2 + 4);
+        if (a & 0x20) v = uint8_t(v * 2 - 8);
+        vm.wr(0xce29, uint8_t(v * 2));
+        return;
+    }
+    if (a < 0x78) {                                            // 5DD4: items
+        copyRecord(vm, rom, uint16_t(0x55c4 + (a - 0x30) * 7));
+        if (vm.rd(0xce27)) {                                   // 5E04
+            vm.wr(0xce26, vm.rd(0xcee0));
+            vm.wr(0xce27, 0);
+            itemInfo(vm, rom);
+            vm.wr(0xce29, 0);
+            vm.wr(0xce26, a);
+            copyRecord(vm, rom, uint16_t(0x55c4 + (a - 0x30) * 7));
+            return;
+        }
+        uint8_t k;
+        if (a < 0x5e) k = 0x81;
+        else if (a < 0x62) k = 0x83;
+        else if (a < 0x6e) k = 0x81;
+        else if (a < 0x71) k = 0x84;
+        else k = 0x83;
+        vm.wr(0xce28, k);
+        return;
+    }
+    if (a < 0xc0) {                                            // 5E1F
+        copyRecord(vm, rom, uint16_t(0x5bfc + (a - 0x78) * 5));
+        vm.wr(0xce26, vm.rd(0xcede));
+        vm.wr(0xce27, 0);
+        itemInfo(vm, rom);
+        vm.wr(0xce29, 0);
+        vm.wr(0xce26, a);
+        copyRecord(vm, rom, uint16_t(0x5bfc + (a - 0x78) * 5));
+        return;
+    }
+    const bool ok = vm.rd(0xcd37) ? (a == 0xd1 || a < 0xcb) : a < 0xd8;
+    if (!ok) return;
+    copyRecord(vm, rom, uint16_t(0x5b70 + (a - 0xc0) * 5));     // 5E61
+    vm.wr(0xce28, 0x28);
+}
+static void itemInfo(BattleVM& vm, const Rom& rom) { itemInfo5d87(vm, rom); vm.wr(0xce27, 0); }
+
 bool runLogicNative(BattleVM& vm, const Rom& rom, uint16_t addr) {
     switch (addr) {
+    case 0x6b64: itemInfo(vm, rom); return true;
+    case 0x6b61: {                        // 09:5D64: the item in the member's first slot
+        vm.wr(0xce25, 0); vm.wr(0xce27, 0);
+        const uint8_t a = vm.rd(uint16_t(memberOffset(vm, rom) + 0xc540));
+        vm.wr(0xce26, a);
+        if (a == 0xff) { vm.wr(0xce28, 0x81); return true; }
+        itemInfo(vm, rom);
+        return true;
+    }
+    case 0x6b4c: bitRange(vm, uint16_t(0xcc5e + uint8_t(vm.rd(0xce84) - 1))); return true;
+    case 0x605d:
+        vm.wr(0xce84, vm.rd(0xcc5e) | vm.rd(0xcc5f) | vm.rd(0xcc60));
+        bitRange(vm, 0xce84);
+        return true;
+    case 0x6b2b:
+        if (vm.rd(0xc9d6) >= 5) vm.wr(0xce91, 0xff);
+        else inventoryTake(vm);
+        return true;
+    case 0x6b3b: inventoryAdd(vm); return true;
+    case 0x6b52: {                        // 0B:7E89
+        const uint8_t a = uint8_t(uint8_t(((vm.rd(0xc96e) - 1) & 0xfe) * 2) + vm.rd(0xc995));
+        vm.wr(0xd888, rdb(vm, rom, 0x0b, uint16_t(vm.rd16(0xc97b) + a)));
+        return true;
+    }
+    case 0x6b58: {                        // 0B:6947: which enemy group holds combatant wD87A
+        const uint8_t n = uint8_t(vm.rd(0xd87a) - 5);
+        const uint8_t m = n < 8 ? uint8_t(1 << n) : 0;
+        uint8_t c = 0;
+        while (c < 3 && !(m & vm.rd(uint16_t(0xcc5e + c)))) c++;
+        vm.wr(0xd87a, c);
+        return true;
+    }
+    case 0x6b41: {                        // 0B:701A: name of item/spell wCE8C -> wCE3C, 0-terminated
+        const uint8_t id = vm.rd(0xce8c);
+        if (id == 0xff) return true;
+        uint16_t src; int n;
+        if (id < 0x30) { src = uint16_t(0x6d9b + id * 6); n = 6; }
+        else { src = uint16_t(0x6ebb + (id - 0x30) * 8); n = 8; }
+        for (int i = 0; i < n; i++) vm.wr(uint16_t(0xce3c + i), rdb(vm, rom, 0x0e, uint16_t(src + i)));
+        uint16_t hl = uint16_t(0xce3c + n);
+        vm.wr(hl, 0xff);
+        while (vm.rd(hl) == 0xff) hl--;
+        vm.wr(uint16_t(hl + 1), 0);
+        return true;
+    }
     case 0x6b49: actionData(vm, rom); return true;
     case 0x445f:                          // count the alive bits of wCC5E-60 -> wD87B-7D
         for (int i = 0; i < 3; i++) {
