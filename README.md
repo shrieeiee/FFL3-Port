@@ -47,8 +47,11 @@ No game data lives in this repo. The port reads graphics, maps, text and so on s
   it calls translated to C++. Damage, hits, criticals, enemy AI, turn order, EXP, level-ups and
   the battle messages are now the original's. Checked by replaying 12 battles recorded in the
   real game, statement for statement.
-- Not yet: Talent/Magic/Item commands in the menu, the real "Auto set" mode, the retry menu
-  after a wipe (it gives up), battle animations (short pauses instead).
+- Talent / Magic / Item: lists, usability, MP checks and target cursor rules from the
+  original menu code (one ally / whole party / one enemy / an enemy group).
+- Not yet: the real "Auto set" mode (Auto = everyone attacks), what happens after a wipe
+  (the port goes back to the start), battle animations (short pauses instead), MP cost
+  shown in the Magic list.
 
 Not yet: event $10 and most $12 effects (logged in the title bar), chests, shops, menus,
 music, NPC wandering, saving, the opening sequence itself.

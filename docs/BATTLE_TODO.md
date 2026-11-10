@@ -60,3 +60,14 @@ Next, in order:
   opens or a cursor blinks, so scripted key timing desyncs. Needs a closed-loop recorder
   that waits for the menu state (e.g. wCDEA / cursor RAM) before each press.
 - Plan: port the 0B menu module (5BDF ... 6900) to C++ properly rather than guess.
+
+## Done: Talent / Magic / Item (src/battle.cpp)
+Lists per 0B:6557/6589/6527 (spell list = bits at record +$51-56, MSB first, id =
+(byte^1)*8 + 7 - bit, as 09:51EA), use kind from 09:5D87 (cd37 = 1 in battle, so battle
+items $CB-$D7 like Fire/Water can't be used - matches the real list behaviour), MP check
+(0B:6589), target start per 0B:670D/6718 (kind bit 7 = enemy side: bit 0 one enemy,
+bit 2 group $81+g; else party: bit 3 one member, bit 4 whole party $80), items >= $C0 are
+taken from the inventory when chosen. Checked in the port: Cure1 on a member, White
+(group spell) on the Hooligans - the battle code ran both.
+After a wipe, 1D77 = 0B:5CDF: members at 0 HP get HP 1 and status &= $40; retry is the
+caller's decision on wCEDA (FF) - not ported yet.
