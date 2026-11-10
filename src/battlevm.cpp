@@ -13,6 +13,7 @@ BattleVM::BattleVM(const Rom& rom) : rom_(rom) {}
 uint8_t BattleVM::rd(uint16_t a) const {
     if (a < 0x4000) return rom_.b(0, a);
     if (a < 0x8000) return rom_.b(0x0c, a);
+    if (written && uninit && a >= 0xc000 && !written[a]) uninit[a]++;
     return mem[a];
 }
 

@@ -45,6 +45,32 @@ int main(int argc, char** argv) {
         }
     }
     std::fclose(f);
+    if (std::getenv("BUILD")) {               // build the whole entry RAM from game state, compare
+        BattleVM t(rom);
+        auto cp = [&](int a, int n) { for (int i = 0; i < n; i++) t.mem[size_t(a + i)] = vm.mem[size_t(a + i)]; };
+        cp(0xc500, 0x300);                    // game state: party, inventory, flags, position...
+        const int form = vm.mem[0xcc5d - 4] == 0 ? 0 : 0;   // formation index unknown here: use ids
+        (void)form;
+        cp(0xcc59, 5);                        // formation bytes
+        cp(0xcc36, 3);                        // counts (random draw)
+        t.mem[0xcd37] = 1;
+        const int ids[3] = {vm.mem[0xcc59], vm.mem[0xcc5a], vm.mem[0xcc5b]};
+        t.mem[0xd684] = pictureResidue(rom, ids);
+        battleSetupCombatants(t, rom);
+        int diffs = 0;
+        std::map<int, int> blocks;
+        for (int a = 0xc000; a < 0x10000; a++) {
+            if (a >= 0xe000 && a < 0xff80) continue;
+            if (t.mem[size_t(a)] != vm.mem[size_t(a)]) { diffs++; blocks[a & 0xfff0]++; }
+        }
+        for (auto& b : blocks) {
+            std::printf(" %04x(%d):", b.first, b.second);
+            for (int a = b.first; a < b.first + 16; a++) if (t.mem[size_t(a)] != vm.mem[size_t(a)]) std::printf(" %02x=%02x", a & 0xff, vm.mem[size_t(a)]);
+            std::printf("\n");
+        }
+        std::printf("build: %d bytes differ\n", diffs);
+        return 0;
+    }
     if (std::getenv("SETUP")) {               // rebuild the combatant table and compare
         BattleVM t = vm;
         for (int a = 0xd000; a < 0xd700; a++) t.mem[size_t(a)] = 0x5a;
@@ -59,6 +85,12 @@ int main(int argc, char** argv) {
         std::printf("setup: %d bytes differ\n", diffs);
         return diffs ? 1 : 0;
     }
+    if (const char* z = std::getenv("ZERO")) {    // e.g. ZERO=c900-c9ff: wipe scratch RAM at entry
+        unsigned a, b;
+        if (std::sscanf(z, "%x-%x", &a, &b) == 2) for (unsigned i = a; i <= b; i++) vm.mem[i] = 0;
+    }
+    static uint8_t wmap[0x10000]; static uint32_t umap[0x10000];
+    if (std::getenv("UNINIT")) { vm.written = wmap; vm.uninit = umap; }
     const size_t total = steps.size();
     vm.start(steps.empty() ? 0x4a2d : steps.front());
     bool bad = false;
@@ -114,7 +146,7 @@ int main(int argc, char** argv) {
                 } else nativeOk[addr]++;
             }
         }
-        for (auto& d : nats.front().diff) vm.mem[d.first] = d.second;
+        for (auto& d : nats.front().diff) { vm.mem[d.first] = d.second; wmap[d.first] = 1; }
         nats.pop_front();
         natCount++;
         if (const char* w = std::getenv("NATDUMP"))
@@ -139,6 +171,11 @@ int main(int argc, char** argv) {
             break;
         }
         if (nats.empty() && steps.size() > 0 && bad) break;
+    }
+    if (vm.uninit) {
+        std::printf("read before written:");
+        for (int a = 0xc000; a < 0x10000; a++) if (umap[a]) std::printf(" %04x=%02x", a, vm.mem[size_t(a)]);
+        std::printf("\n");
     }
     std::printf("logic natives checked:");
     for (auto& n : nativeOk) std::printf(" %04x x%d", n.first, n.second);

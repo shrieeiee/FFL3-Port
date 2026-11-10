@@ -4,8 +4,20 @@ Done: VM interpreter (src/battlevm.cpp), 30 logic natives (src/battlenatives.cpp
 harness (tests/vmreplay.cpp, tests/test_vm.sh, tools/trace.c, tools/rec.py). Recordings in
 /root/ffl3/rec (not in git: they contain game data). All 12 recordings pass.
 
+Done since: step 1 below (battleSetupCombatants matches the real table on every recording;
+record +4 = byte $284 of the last group's decompressed picture plane B, see pictureResidue),
+natives 6B25/6B28/6B44.
+
+Uninitialised reads (vmreplay UNINIT=1): besides the setup data, the VM reads RAM left over
+from the previous battle: wC9E6, wC9F8/F9 (message state, normally $FF), wCE00-13 (last
+commands), wCE8C, wD875-77, plus wC6E3 (vehicle), wCA2D (area), wCC59/5C/5E-60, wDDFF.
+Zeroing wC900-C9FF at entry changes the control flow, so the port must keep one persistent
+battle RAM image across battles (initial values: WRAM cleared, wC9F8/F9 = $FF, wCE8C = $FF).
+Tools: vmreplay SETUP=1 (setup check), BUILD=1 (diff a built entry image), ZERO=a-b,
+UNINIT=1, NATPRE=/NATDUMP=addr (print state around a native).
+
 Next, in order:
-1. Port the pre-VM battle setup 0B:4000 -> 0B:4444 (combatant table): fill wD000-D67F $FF;
+1. (done) Port the pre-VM battle setup 0B:4000 -> 0B:4444 (combatant table): fill wD000-D67F $FF;
    copy present party records (c500+i*60, +3 != FF) 0x60 bytes to D000+i*80; copy 4 bytes
    c518+i*60 -> d070+i*80 (if c518 != FF); zero 6 bytes at d06a+i*80; then per group g with
    count wCC36+g: build the monster record at wD680 (4526: clear d690-d6ff, name 0E:7533 ->

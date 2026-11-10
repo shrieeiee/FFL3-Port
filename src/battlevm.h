@@ -25,7 +25,10 @@ public:
 
     uint8_t rd(uint16_t a) const;
     uint16_t rd16(uint16_t a) const { return uint16_t(rd(a) | rd(uint16_t(a + 1)) << 8); }
-    void wr(uint16_t a, uint8_t v) { if (a >= 0x8000) mem[a] = v; }
+    void wr(uint16_t a, uint8_t v) { if (a >= 0x8000) { mem[a] = v; if (written) written[a] = 1; } }
+    // Debug: when set, reads of RAM not yet written since start() are counted in uninit[].
+    uint8_t* written = nullptr;
+    uint32_t* uninit = nullptr;
 
     void start(uint16_t pc);                  // 0C:4000: VM stack at wCC11, pc = de
     // Run until a native asks to yield, the program ends, or `maxSteps` statements ran.
