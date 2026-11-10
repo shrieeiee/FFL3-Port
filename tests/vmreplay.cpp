@@ -25,6 +25,7 @@ int main(int argc, char** argv) {
     std::deque<uint16_t> steps, randoms;
     struct Nat { uint16_t addr; std::vector<std::pair<uint16_t, uint8_t>> diff; };
     std::deque<Nat> nats;
+    std::deque<std::vector<std::pair<uint16_t, uint8_t>>> reentries;   // RAM changes between VM runs
     f = std::fopen(argv[3], "r");
     static char line[1 << 20];
     while (std::fgets(line, sizeof line, f)) {
@@ -32,6 +33,11 @@ int main(int argc, char** argv) {
         if (line[0] == 'S' && std::sscanf(line + 2, "%x", &a) == 1) steps.push_back(uint16_t(a));
         else if (line[0] == 'R' && std::sscanf(line + 2, "%x", &a) == 1) randoms.push_back(uint16_t(a));
         else if (line[0] == 'N' && std::sscanf(line + 2, "%x", &a) == 1) nats.push_back({uint16_t(a), {}});
+        else if (line[0] == 'E') {
+            reentries.push_back({});
+            for (char* p = std::strtok(line + 1, " \n"); p; p = std::strtok(nullptr, " \n"))
+                if (std::sscanf(p, "%x:%x", &a, &v) == 2) reentries.back().push_back({uint16_t(a), uint8_t(v)});
+        }
         else if (line[0] == 'D' && !nats.empty()) {
             for (char* p = std::strtok(line + 1, " \n"); p; p = std::strtok(nullptr, " \n"))
                 if (std::sscanf(p, "%x:%x", &a, &v) == 2) nats.back().diff.push_back({uint16_t(a), uint8_t(v)});
@@ -96,6 +102,12 @@ int main(int argc, char** argv) {
     vm.random = [&](uint8_t) { if (randoms.empty()) { std::printf("out of randoms\n"); bad = true; return uint8_t(0); } uint8_t r = uint8_t(randoms.front()); randoms.pop_front(); return r; };
     while (!bad && !steps.empty()) {
         const auto st = vm.run(1);
+        if (st == BattleVM::Stop::End && !steps.empty() && steps.front() == 0x4a2d) {
+            std::printf("battle restarted (retry after defeat)\n");
+            if (!reentries.empty()) { for (auto& d : reentries.front()) vm.mem[d.first] = d.second; reentries.pop_front(); }
+            vm.start(0x4a2d);
+            continue;
+        }
         if (st == BattleVM::Stop::End || st == BattleVM::Stop::Bad) {
             if (!steps.empty()) std::printf("VM stopped (%d) with %zu steps left\n", int(st), steps.size());
             break;

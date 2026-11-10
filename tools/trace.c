@@ -34,7 +34,15 @@ static void trace(struct gb_s *gb, uint16_t pc) {
     if (!g_tr) return;
     unsigned bank = pc < 0x4000 ? 0 : gb->selected_rom_bank;
     if (g_rp && bank == 0x0c) {
-        if (pc == 0x4008) fprintf(g_rp, "S %04x\n", gb->cpu_reg.de.reg);
+        if (pc == 0x4008) {
+            fprintf(g_rp, "S %04x\n", gb->cpu_reg.de.reg);
+            if ((peek(gb, gb->cpu_reg.de.reg) & 0x1f) == 0x1f) { snap(gb, g_snap); g_innative = 2; }
+        }
+        else if (pc == 0x4000 && g_innative == 2) {
+            uint8_t now[0x2080]; snap(gb, now); fprintf(g_rp, "E");
+            for (int i = 0; i < 0x2080; i++) if (now[i] != g_snap[i]) fprintf(g_rp, " %04x:%02x", i < 0x2000 ? 0xc000 + i : 0xff80 + i - 0x2000, now[i]);
+            fprintf(g_rp, "\n"); g_innative = 0;
+        }
         else if (pc == 0x4135) { uint16_t de = gb->cpu_reg.de.reg; fprintf(g_rp, "N %04x %ld\n", peek(gb, de + 1) | peek(gb, de + 2) << 8, g_frame); snap(gb, g_snap); g_innative = 1; }
         else if (pc == 0x4143 && g_innative) {
             uint8_t now[0x2080]; snap(gb, now); fprintf(g_rp, "D");

@@ -202,3 +202,41 @@ Screen (VRAM, formation 00)
 
 Still to decode: battle effect VM (0C:4008; opcode = byte&$1F, tables 0C:4320/0C:433C) for
 hit/damage/critical/escape, enemy AI, Talent/Magic/Item, EXP/level-ups.
+
+## Battle VM (milestone 6, in progress)
+
+The whole battle is bytecode in bank 0C. 0B:4044 enters the VM once (0C:4000, de = 0C:4A2D);
+when the program ends (op $1F at statement level) 0B re-enters at 4A2D for a retry after a
+defeat (RAM changes in between are recorded as "E" lines). Instruction set: tools/battlevm.py;
+C++ interpreter: src/battlevm.cpp (exact, including the original's quirks: a signed multiply
+whose negation drops the low byte to $80, x/0 = 0, the statement-skip table at 0C:437C that
+skips only 1 byte after an "if" for op $0B).
+
+Testing: tools/trace.c (Peanut-GB) with REPLAY=out.txt records every VM statement (S), native
+call + its RAM changes (N/D), random numbers drawn by the VM (R, at 0C:4416 / 0C:42FA) and
+re-entries (E); enter.mem = RAM at the first entry. tools/rec.py drives a battle; tests/vmreplay
+replays it: 9 recordings (mash A, boss defeat + retry, Run, Auto, Item, Talent, three
+formations) - every statement matches, ~1.1k native calls replayed.
+
+Variables (wC900+): $00-1F actor record copy, then actor/target pairs: $20 actor HP, $22
+target HP, $24/$26 max HP, $28/$2A MP, $30-33 actor str/def/mag/agi, $34-37 target's; $9B
+action type<<4, $9D action id; $AD-$BE action data (09:5466); $B6 = power; $BC = kind;
+$BF message id (09:78FE table -> battle text); $C0 = damage being built; $D6 = actor index,
+$DE target index; $68 hit chance, $69 roll (rnd 100 + 1). Damage table wD822 + 2*target
+($8080 = none); wCC5E-60 alive bitmasks of the 3 enemy groups; combatants wD000 + i*$80.
+
+Weapon damage example (Myron, ●Battle, crit on a Hooligan): $C0 = power + str + mag
+(0C:7724, by weapon kind $BC), x2 for a critical (0C:7BDC: roll <= 5), x2 again for the
+genus bonus (0C:75B9), then $C0 / targets - def / targets (0C:75D9) = 204.
+
+Natives (VM op 03), 45 in all:
+- logic, translated in src/battlenatives.cpp and checked against the recordings: 445F 4490
+  44AC 4865 49DB 4B9F 4BF6 4D41 5DB6 5F9D 5FCC 5FD3 5FDB 5FF1 602B 6042 606D 6083 6851,
+  6B49 (= 09:5466 action data)
+- still to do: 6B64/6B61 (09:5D7F/5D64 item usability), 6B41 (0B:701A), 6B44 (0B:7349 +
+  0B:728B), 6B4C (0B:6EAE), 6B52 (0B:7E89), 6B58 (0B:6947), 6B25/6B28 (0B:44F0/4502),
+  6B2B/6B3B (0B:706C/7037), 605D (0B:6EB6), 1D71/1D74/1D77 (end of battle), 1E46, 2499, 24C7
+- UI: 1D69 = 0B:5BDF, the whole player command phase (Fight/Run/Auto, member commands,
+  targets) -> per-member commands at wCE00 + 4i (4D41 copies them to record +$62-64);
+  5FB7 = 0B:6FA1 print battle message (pointer wCE8D/8E); 6001, 6B68/6B6C/6B71/6B7F =
+  animations and sound (wDE00 = sound effect).

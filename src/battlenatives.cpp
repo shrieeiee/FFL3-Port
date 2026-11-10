@@ -15,8 +15,75 @@ static uint16_t combatant(const BattleVM& vm, uint16_t field) {
     return uint16_t(0xd000 + vm.rd(0xc9d6) * 0x80 + field);
 }
 
+// 09:5466 (VM native 0C:6B49): unpack the data of the action in wC99B (type << 4) / wC99D (id)
+// - weapon, spell, item, talent... - into wC9AD-C9BE. Tables in bank 9, lookups in bank 0B.
+static void actionData(BattleVM& vm, const Rom& rom) {
+    const int type = (vm.rd(0xc99b) >> 4) & 0x0f;
+    const uint8_t c = vm.rd(0xc99d);
+    uint16_t hl;
+    auto r = [&]() { return rom.b(9, hl); };
+    auto f551e = [&]() {
+        const uint8_t a = r();
+        vm.wr(0xc9ad, rom.b(0x0b, uint16_t(0x7104 + ((a >> 4) & 0x0f))));
+        const uint8_t lo = a & 0x0f;
+        hl++;
+        vm.wr(0xc9af, lo); vm.wr(0xc9b2, lo);
+        vm.wr(0xc9ae, rom.b(0x0b, uint16_t(0x7114 + lo)));
+        vm.wr(0xc9af, 0);
+        if (uint8_t(lo - 1) < 2) vm.wr(0xc9af, vm.rd(0xc9ae));
+    };
+    auto f5557 = [&]() { vm.wr(0xc9b6, r()); hl++; };
+    auto f555c = [&]() {
+        const uint8_t a = r(); hl++;
+        vm.wr(0xc9b3, a >> 6);
+        vm.wr(0xc9bc, a & 0x3f);
+        if ((a & 0x3f) >= 0x0a && (a & 0x3f) < 0x0d) vm.wr(0xc9af, 0);
+    };
+    auto f5575 = [&]() { vm.wr(0xc9bd, r()); hl++; };
+    auto f557a = [&]() { const uint8_t a = r(); hl++; vm.wr(0xc9bb, a >> 6); vm.wr(0xc9be, a & 0x3f); };
+    auto f558d = [&]() { vm.wr(0xc9ba, r()); hl++; };
+    auto f5592 = [&]() { const uint8_t a = r(); hl++; vm.wr(0xc9b0, a >> 4); vm.wr(0xc9b1, a & 0x0f); };
+    auto f55a1 = [&]() { vm.wr(0xc9b9, r()); hl++; };
+    auto f55a6 = [&]() { const uint8_t a = r(); hl++; vm.wr(0xc9b4, a >> 4); vm.wr(0xc9b5, a & 0x0f); };
+    auto f55b5 = [&]() { const uint8_t a = r(); hl++; vm.wr(0xc9b7, a >> 4); vm.wr(0xc9b8, a & 0x0f); };
+    switch (type) {
+    case 0: {                             // 5488: 7-byte records at 09:55C4 (index wraps like the GB)
+        const uint8_t a1 = uint8_t(0xd0 + c), a2 = uint8_t(a1 * 2);
+        hl = uint16_t(0x55c4 + a1 + a2 * 3);
+        f551e(); f5557(); f555c(); f5575(); f557a(); f558d(); f5592();
+        break;
+    }
+    case 1: {                             // 5501: 6-byte records at 09:57BC
+        const uint8_t a = uint8_t(c * 2);
+        hl = uint16_t(0x57bc + a * 3);
+        f551e(); f5557(); f555c(); f5575(); f557a(); f55a1();
+        break;
+    }
+    case 2: {                             // 54C7: 6-byte records at 09:5A50
+        const uint8_t a = uint8_t(c * 2);
+        hl = uint16_t(0x5a50 + a * 3);
+        f551e(); f5557(); f555c(); f5575(); f557a(); f55a1();
+        break;
+    }
+    case 3: {                             // 54E4: 5-byte records at 09:5B70
+        const uint8_t a1 = uint8_t(0x40 + c), a = uint8_t(a1 * 5);
+        hl = uint16_t(0x5b70 + a);
+        f551e(); f5557(); f555c(); f5575(); f557a();
+        break;
+    }
+    case 4: {                             // 54AB: 5-byte records at 09:5BFC
+        const uint8_t a1 = uint8_t(0x88 + c), a2 = uint8_t(a1 * 2);
+        hl = uint16_t(0x5bfc + a1 + a2 * 2);
+        f551e(); f55b5(); f55a6(); f558d(); f5592();
+        break;
+    }
+    default: break;                       // the table has 5 entries
+    }
+}
+
 bool runLogicNative(BattleVM& vm, const Rom& rom, uint16_t addr) {
     switch (addr) {
+    case 0x6b49: actionData(vm, rom); return true;
     case 0x445f:                          // count the alive bits of wCC5E-60 -> wD87B-7D
         for (int i = 0; i < 3; i++) {
             uint8_t v = vm.rd(uint16_t(0xcc5e + i)), n = 0;
