@@ -423,8 +423,52 @@ void battleSetupCombatants(BattleVM& vm, const Rom& rom) {
     spellBits(vm, rom);
 }
 
+// 00:2499: wCD46-49 = (wCD48-49) * (old wCD46-47), 32-bit
+static void mul2499(BattleVM& vm) {
+    const uint32_t de = uint32_t(vm.rd(0xcd46) | vm.rd(0xcd47) << 8);
+    const uint32_t hi = uint32_t(vm.rd(0xcd48) | vm.rd(0xcd49) << 8);
+    const uint32_t r = hi * de;
+    for (int i = 0; i < 4; i++) vm.wr(uint16_t(0xcd46 + i), uint8_t(r >> (8 * i)));
+}
+// 00:24C7: wCD46-49 / (old wCD4A-4B): quotient in CD46-49, remainder in CD4A-4B
+static void div24c7(BattleVM& vm) {
+    const uint16_t div = uint16_t(vm.rd(0xcd4a) | vm.rd(0xcd4b) << 8);
+    uint64_t v = 0;
+    for (int i = 0; i < 4; i++) v |= uint64_t(vm.rd(uint16_t(0xcd46 + i))) << (8 * i);
+    for (int b = 0; b < 32; b++) {
+        const bool top = (v >> 47) & 1;
+        v = (v << 1) & 0xffffffffffffull;
+        const uint16_t rem = uint16_t(v >> 32);
+        if (top || rem >= div) {
+            v |= 1;
+            v = (v & 0xffffffffull) | uint64_t(uint16_t(rem - div)) << 32;
+        }
+    }
+    for (int i = 0; i < 6; i++) vm.wr(uint16_t(0xcd46 + i), uint8_t(v >> (8 * i)));
+}
+// 0F:79D4 (native 1E46): EXP needed for the next level of members 0-3 -> wCD9D + 3i
+static void expTable(BattleVM& vm, const Rom& rom) {
+    for (int i = 0; i < 4; i++) {
+        gbFill(vm, 0xcd46, 0, 3);
+        const uint16_t t = uint16_t((vm.rd(0xcd37) ? 0x1fed : 0x1fe3) + uint8_t(i * 2));
+        const uint16_t off = uint16_t(rom.b(0, t) | rom.b(0, uint16_t(t + 1)) << 8);
+        const uint8_t lv = vm.rd(uint16_t(0xc503 + off));
+        if (lv != 0x63) {
+            vm.wr(0xcd46, uint8_t(lv + 4));
+            const uint8_t a = uint8_t(lv + 1);
+            const uint16_t sq = uint16_t(uint32_t(a) * a);           // 00:246B (16-bit)
+            vm.wr(0xcd48, uint8_t(sq)); vm.wr(0xcd49, uint8_t(sq >> 8));
+            mul2499(vm);
+        }
+        for (int k = 0; k < 3; k++) vm.wr(uint16_t(0xcd9d + i * 3 + k), vm.rd(uint16_t(0xcd46 + k)));
+    }
+}
+
 bool runLogicNative(BattleVM& vm, const Rom& rom, uint16_t addr) {
     switch (addr) {
+    case 0x2499: mul2499(vm); return true;
+    case 0x24c7: div24c7(vm); return true;
+    case 0x1e46: expTable(vm, rom); return true;
     case 0x6b25:                          // 0B:44F0: monster wC91B into wD680
         vm.wr(0xcc70, vm.rd(0xc91b));
         gbFill(vm, 0xd690, 0xff, 0x70);

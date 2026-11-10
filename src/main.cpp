@@ -149,11 +149,21 @@ int main(int argc, char** argv) {
     std::vector<CharRecord> party;
     auto newParty = [&] { party.clear(); for (int i = 0; i < 5; i++) party.push_back(loadCharacter(rom, i)); };
     newParty();
+    static BattleRam battleRam;                     // the GB's RAM as battles see it, kept across fights
+    initBattleRam(battleRam);
     std::unique_ptr<Battle> battle;
     BattleGfx bgfx;
     uint32_t battleSeed = 1;
     field.startBattle = [&](int hffca) {
-        battle = std::make_unique<Battle>(rom, party, hffca, battleSeed++);
+        BattleContext ctx;
+        for (int i = 0; i < 32; i++) {
+            uint8_t b = 0;
+            for (int k = 0; k < 8; k++) if (flags.event.test(size_t(i * 8 + k))) b |= uint8_t(0x80 >> k);
+            ctx.eventFlags[size_t(i)] = b;
+        }
+        ctx.vehicle = field.vehicle();
+        ctx.area = field.encounterArea();
+        battle = std::make_unique<Battle>(rom, battleRam, party, ctx, hffca, battleSeed++ * 2654435761u);
         bgfx.build(rom, *battle);
         char b[64]; std::snprintf(b, sizeof b, "battle: formation %02X%s", hffca & 0x7f, hffca & 0x80 ? " (fixed)" : "");
         field.setLastEvent(b);
@@ -164,6 +174,7 @@ int main(int argc, char** argv) {
         battle.reset();
         if (r == Battle::Result::Lost) {
             newParty();
+            initBattleRam(battleRam);
             text.close();
             field.enterMap(0x0b, 26, 7, Dir::Up);
             field.setLastEvent("party defeated - back to the start");
@@ -255,21 +266,8 @@ int main(int argc, char** argv) {
             }
             std::fclose(f);
         }
-        for (const std::string& l : B.log) {
-            std::string a;
-            for (unsigned char t : l) {
-                if (t >= 0xba && t <= 0xd3) a += char('A' + t - 0xba);
-                else if (t >= 0xd4 && t <= 0xed) a += char('a' + t - 0xd4);
-                else if (t >= 0xb0 && t <= 0xb9) a += char('0' + t - 0xb0);
-                else if (t == 0xff) a += ' ';
-                else if (t == 0xaf) a += '.';
-                else if (t == 0xf3) a += '!';
-                else if (t == 0xf2) a += '-';
-                else if (t == 0xad) a += '\'';
-                else a += '#';
-            }
-            std::printf("| %s\n", a.c_str());
-        }
+        for (uint16_t n : B.unknownNatives) std::printf("unhandled native %04X\n", n);
+        for (const std::string& l : B.log) std::printf("| %s\n", l.c_str());
         const char* res[] = {"none", "won", "lost", "ran"};
         std::printf("result: %s, frames %d, party HP:", res[int(B.result())], frameNo);
         if (B.finished()) for (const CharRecord& c : party) std::printf(" %d", c.hp());

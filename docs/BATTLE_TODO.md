@@ -16,6 +16,11 @@ battle RAM image across battles (initial values: WRAM cleared, wC9F8/F9 = $FF, w
 Tools: vmreplay SETUP=1 (setup check), BUILD=1 (diff a built entry image), ZERO=a-b,
 UNINIT=1, NATPRE=/NATDUMP=addr (print state around a native).
 
+Now running in the game (src/battle.cpp): setup, VM, logic natives, the command phase
+(Fight-Weapon / Run / Auto as "everyone attacks"), messages (bank 9 text, battle name
+codes; $1E = talent name when a monster acts), waits for animations. Also translated: 1E46
+(EXP table), 2499/24C7 (32-bit mul/div). wFF93 ticks every 150 VM statements (a frame).
+
 Next, in order:
 1. (done) Port the pre-VM battle setup 0B:4000 -> 0B:4444 (combatant table): fill wD000-D67F $FF;
    copy present party records (c500+i*60, +3 != FF) 0x60 bytes to D000+i*80; copy 4 bytes

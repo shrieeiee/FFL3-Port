@@ -42,8 +42,13 @@ No game data lives in this repo. The port reads graphics, maps, text and so on s
 - Battle screen pixel-identical to the real game for the Fight/Run/Auto menu and the status
   panel; command menus, target brackets, typed battle messages in the game's own wording
 - Fight (Weapon) → pick a target, Run, Auto; win / run / party wiped (back to the start)
-- **Provisional:** hit/damage/critical maths, enemy AI and turn-order tie-breaks are stand-ins
-  until the battle effect VM (0C:4008) is decoded. Talent/Magic/Item commands aren't wired yet.
+- **Milestone 6 (in progress) – the real battle rules.** The whole battle is bytecode in the
+  ROM; the port runs it on a C++ interpreter of the original VM, with every helper routine
+  it calls translated to C++. Damage, hits, criticals, enemy AI, turn order, EXP, level-ups and
+  the battle messages are now the original's. Checked by replaying 12 battles recorded in the
+  real game, statement for statement.
+- Not yet: Talent/Magic/Item commands in the menu, the real "Auto set" mode, the retry menu
+  after a wipe (it gives up), battle animations (short pauses instead).
 
 Not yet: event $10 and most $12 effects (logged in the title bar), chests, shops, menus,
 music, NPC wandering, saving, the opening sequence itself.
