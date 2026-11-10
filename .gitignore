@@ -7,3 +7,6 @@ third_party/
 *.mem
 maps_sheet.png
 __pycache__/
+*.png
+*.pgm
+rec/

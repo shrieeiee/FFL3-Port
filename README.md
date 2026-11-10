@@ -2,8 +2,13 @@
 
 A native PC port of **Final Fantasy Legend III** (SaGa 3, Game Boy, 1991), written in C++17 + SDL2.
 
-No game data lives in this repo. The port reads graphics, maps, text and so on straight out of
-**your own ROM** at runtime, the same way the original code does.
+> **You need your own, legally obtained ROM of Final Fantasy Legend III (U).** No game data,
+> graphics, text or ROM dumps are included in this repository, and none will be accepted.
+> The port reads everything (graphics, maps, text, the battle code itself) straight out of
+> your ROM at runtime. This is an unofficial fan project, not affiliated with or endorsed by
+> Square Enix. Final Fantasy and SaGa are trademarks of Square Enix.
+
+Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf771195171af`.
 
 ## Status
 
@@ -99,6 +104,9 @@ ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
 - `tests/test_maps.sh saga3.gb` – C++ map loader vs the Python reference, all 192 maps
 - `tests/test_field.sh saga3.gb` – collision/exit behaviour, expected values taken from the
   real game running in the coverage emulator
+- `tests/test_vm.sh saga3.gb build/vmreplay RECDIR` – replays battles recorded in the real game
+  through the battle VM (recordings are made with `tools/rec.py`; they contain game data, so
+  they are not in the repo)
 - `tests/test_battle.py build/ffl3 saga3.gb DUMPS` – formation layout, monster data, battle
   windows and picture tiles vs VRAM dumps from the real game (VRAM checks skip without dumps)
 
@@ -118,3 +126,15 @@ ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
 See `docs/RE_NOTES.md` for engine structure and addresses. It builds on
 [daid/FFL3-Disassembly](https://github.com/daid/FFL3-Disassembly) and the tables in
 [abyssonym/ffl3rando](https://github.com/abyssonym/ffl3rando).
+
+## Research tools
+
+`tools/` holds the scripts used to reverse-engineer the game (map/text decoders, the battle VM
+disassembler, emulator-driven recorders). The emulator tools (`cov.c`, `trace.c`) build
+against [Peanut-GB](https://github.com/deltabeard/Peanut-GB) (MIT), which is not included;
+some scripts still point at the author's local working folders.
+
+## Licence
+
+The code in this repository is MIT licensed (see `LICENSE`). That covers this code only, not
+the game it ports.
