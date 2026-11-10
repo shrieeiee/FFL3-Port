@@ -71,6 +71,11 @@ int main(int argc, char** argv) {
     int nativeFails = 0;
     std::map<uint16_t, int> nativeOk;
     vm.native = [&](uint16_t addr) {
+        if (const char* w = std::getenv("NATPRE"))
+            if (addr == std::strtol(w, nullptr, 16))
+                std::printf("pre %04x: vbf=%02x vd6=%02x vde=%02x d873=%02x %02x %02x %02x %02x ce7c=%02x %02x %02x %02x cd36=%02x cd4c=%02x ce8c=%02x c9a5=%02x\n", addr,
+                    vm.mem[0xc9bf], vm.mem[0xc9d6], vm.mem[0xc9de], vm.mem[0xd873], vm.mem[0xd874], vm.mem[0xd875], vm.mem[0xd876], vm.mem[0xd877],
+                    vm.mem[0xce7c], vm.mem[0xce7d], vm.mem[0xce7e], vm.mem[0xce7f], vm.mem[0xcd36], vm.mem[0xcd4c], vm.mem[0xce8c], vm.mem[0xc9a5]);
         if (nats.empty() || nats.front().addr != addr) {
             std::printf("native mismatch: port %04x, game %04x\n", addr, nats.empty() ? 0 : nats.front().addr);
             bad = true; return false;
@@ -97,6 +102,12 @@ int main(int argc, char** argv) {
         for (auto& d : nats.front().diff) vm.mem[d.first] = d.second;
         nats.pop_front();
         natCount++;
+        if (const char* w = std::getenv("NATDUMP"))
+            if (addr == std::strtol(w, nullptr, 16)) {
+                std::printf("after %04x: ce00", addr);
+                for (int i = 0; i < 0x14; i++) std::printf("%s%02x", i % 4 ? "" : " ", vm.mem[0xce00 + i]);
+                std::printf(" d061=%02x ffbc=%02x\n", vm.mem[0xd061], vm.mem[0xffbc]);
+            }
         return true;
     };
     vm.random = [&](uint8_t) { if (randoms.empty()) { std::printf("out of randoms\n"); bad = true; return uint8_t(0); } uint8_t r = uint8_t(randoms.front()); randoms.pop_front(); return r; };

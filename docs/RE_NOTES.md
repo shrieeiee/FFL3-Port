@@ -232,11 +232,34 @@ genus bonus (0C:75B9), then $C0 / targets - def / targets (0C:75D9) = 204.
 Natives (VM op 03), 45 in all:
 - logic, translated in src/battlenatives.cpp and checked against the recordings: 445F 4490
   44AC 4865 49DB 4B9F 4BF6 4D41 5DB6 5F9D 5FCC 5FD3 5FDB 5FF1 602B 6042 606D 6083 6851,
-  6B49 (= 09:5466 action data)
-- still to do: 6B64/6B61 (09:5D7F/5D64 item usability), 6B41 (0B:701A), 6B44 (0B:7349 +
-  0B:728B), 6B4C (0B:6EAE), 6B52 (0B:7E89), 6B58 (0B:6947), 6B25/6B28 (0B:44F0/4502),
-  6B2B/6B3B (0B:706C/7037), 605D (0B:6EB6), 1D71/1D74/1D77 (end of battle), 1E46, 2499, 24C7
+  6B49 (= 09:5466 action data), 6B64/6B61 (09:5D7F/5D64 item info -> wCEDB, wCE28/29),
+  6B41 (0B:701A name of item wCE8C -> wCE3C), 6B4C/605D (0B:6EAE/6EB6 bit range ->
+  wCE8F/90), 6B52 (0B:7E89), 6B58 (0B:6947), 6B2B/6B3B (0B:706C/7037 inventory take/add;
+  inventory = 24 (id, count) pairs at wC6FF). Not yet exercised by a recording: 6B4C 6B52
+  6B58 6B2B 6B3B and the spell path of 6B64.
+- still to do: 6B44 (0B:7349 + 0B:728B equipment/status), 6B25/6B28 (0B:44F0/4502 build a
+  monster record at wD680: stats 0B:4A19, talents 0B:533D, drops 0B:470D, calls 0B:6E74,
+  7349, 728B), 1D71/1D74/1D77 (rst18 1D/19/1C bank 0B 6E40/6ED9/5BDF), 1E46, 2499, 24C7
 - UI: 1D69 = 0B:5BDF, the whole player command phase (Fight/Run/Auto, member commands,
   targets) -> per-member commands at wCE00 + 4i (4D41 copies them to record +$62-64);
   5FB7 = 0B:6FA1 print battle message (pointer wCE8D/8E); 6001, 6B68/6B6C/6B71/6B7F =
   animations and sound (wDE00 = sound effect).
+
+### Battle setup before the VM (0B:4000)
+ffBA = ((wCC5C >> 4) & 3) + 1; call 0B:405A; call 0B:4444; rst18 6E; call 00:1DFD;
+wDDFF = 4 or 5 (guest present: wD203 != $FF) ... then VM at 4A2D. These build the combatant
+table wD000 (party copies + monsters, likely via 0B:44F0) and must be ported too.
+
+### Command phase output (1D69 = 0B:5BDF with wCE88 = 1)
+Per party member i: wCE00+4i = action type (record +$62 -> VM $9B: type<<4 | flags; 0 =
+attack with the slot-0 weapon), +1 unused, +2 target (record +$63 -> $9C: combatant index,
+or $80 | group+1 for a whole group; $FF = none), +3 action id (record +$64 -> $9D; $FF for
+the default weapon). Run: wD061 bit 7 set, targets $FF. Mashing A gives 00 00 05 FF
+(first alive monster). wCE88 = 2 is the "retry / give up" menu after a defeat (1D77).
+
+### Battle messages (5FB7 = 0B:6FA1)
+Text id wC9BF -> 09:78FE pointer table -> bank 9 text in the normal text VM format. Battle
+name codes: $1F $FF = combatant wCD36 (party 0-4, enemies $80+k = slot k+5), $1F $80 =
+combatant wCD4C, $1E $80 = the name in wCE3C (built by 6B41), $30 = a number. A turn's
+messages accumulate in a 2-line window (WY 88) and scroll. Ids: $34 "X used / Y against",
+$35 "Z.", $3E "A mighty blow!", $1D "X fell.", $40 "Missed!", $43 "Won!", $06/$07 run.
