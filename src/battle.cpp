@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "battle.h"
 #include "battlenatives.h"
 #include <algorithm>
@@ -202,6 +203,7 @@ bool Battle::native(uint16_t addr) {
         state_ = State::Message;
         return false;
     case 0x6001: case 0x6b68: case 0x6b6c: case 0x6b71: case 0x6b7f:   // animations / sound
+        if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9de=%02X\n", addr, m(0xde00), m(0xc9de));
         timer_ = 16;
         if (m(0xc9de) >= 5 && m(0xc9de) < 13) { flashSlot_ = m(0xc9de) - 5; flashTimer_ = 16; }   // blink the target
         state_ = State::Wait;
