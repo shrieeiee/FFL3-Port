@@ -129,6 +129,7 @@ private:
     int blocksVersion_ = 0;
     int holesFilled_ = 0;              // wCA01: boulders dropped this visit (event $2B)
     bool tryPush(int row, int col, Dir d);
+    void applyMapPatches();
     void boulderLanded(int slot);           // wC6E9-C6ED: saved position (event $10 4x/Dx/Ex)
     std::string lastEvent_;
     uint32_t rng_ = 0x5a6a3;

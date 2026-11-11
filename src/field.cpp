@@ -25,6 +25,7 @@ bool Field::enterMap(int map, int row, int col, Dir facing) {
     exits_ = loadMapExits(rom_, map);
     walks_.clear();
     holesFilled_ = 0;                                                  // 00:0282
+    applyMapPatches();
     if (hdr_.music != 0x1f) music = hdr_.music;
 
     for (Actor& a : actors_) a = Actor{};
@@ -151,6 +152,29 @@ bool Field::objectPassable(int row, int col) const {
     if ((a & 0xc0) == 0xc0) return false;
     if ((a & 0xc0) == 0x80) return true;
     return (a & 0x45) == 0;
+}
+
+// 0B:78F5 (map load, and event $1F): story changes to a map's blocks. 47 entries: map
+// 0B:7982[e], flag 0B:79B1[e] ($FF = always), patch 0B:79E0[e] -> col, row, then 0B:792D's
+// rectangle (width << 4 | height, then the blocks row by row).
+void Field::applyMapPatches() {
+    for (int e = 0; e < 0x2f; e++) {
+        if (rom_.b(0x0b, uint16_t(0x7982 + e)) != map_) continue;
+        const uint8_t f = rom_.b(0x0b, uint16_t(0x79b1 + e));
+        if (f != 0xff && !flags_.test(f)) continue;
+        uint16_t p = rom_.w(0x0b, uint16_t(0x79e0 + e * 2));
+        const int col = rom_.b(0x0b, p++), row = rom_.b(0x0b, p++);
+        const uint8_t hdr = rom_.b(0x0b, p++);
+        if (!hdr) continue;
+        const int w = hdr >> 4, h = hdr & 15;
+        for (int r = 0; r < h; r++)
+            for (int c = 0; c < w; c++) {
+                const size_t at = size_t((row + r) * cols() + col + c);
+                const uint8_t v = rom_.b(0x0b, p++);
+                if (at < layout_.blocks.size()) layout_.blocks[at] = v;
+            }
+    }
+    blocksVersion_++;
 }
 
 // 01:51FE (move type $0B): when the leader walks into the object, it is shoved one block the
@@ -419,6 +443,7 @@ void Field::runEventCommand(int cmd, int param) {
         return;
     case 0x2d: case 0x2e: case 0x30: case 0x31: return;                // 12db: nothing
     case 0x2a: if (openText) openText(0xa, 0x7a7d); return;            // 1bd7: rst $A0 0A:7A7D
+    case 0x1f: applyMapPatches(); return;                              // 137c -> 0B:78F5
     case 0x22:                                                         // 1a84: rest (fade, heal)
         if (playSfx) playSfx(0x17);
         if (healParty) healParty();
