@@ -85,9 +85,12 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   and targets come from 09:5D87 like in battle.
 - Event $10: characters joining / leaving (0B:6DE4 / 6E33, 4th member stays for good), the
   saved return spot (01:6A74 table, save / restore), facing flags, object reload; $12 $10.
-- Text codes $0C (timed pause), $11 / $27 (cosmetic).
+- Text codes $0C (timed pause), $11 / $27 (cosmetic). Fixed $27's length (it takes no
+  argument): it was knocking 18 NPC scripts off the rails (the Dwelg fight text among them).
+- Map event blocks: damage floors ($20), status-cure ($21) and healing ($22) spots, the
+  slide-and-exit $08/$09.
 
-Not yet: event $10 A/C/F/5/8 and most $12 effects, text code $43 (cutscene sprites), the shop / menu screens' exact
+Not yet: event $10 A/C/F/5/8 and most $12 effects, the shop / menu screens' exact
 original layouts (the port's own for now), the battle
 "Auto set" mode, battle animations, NPC wandering, the opening sequence.
 

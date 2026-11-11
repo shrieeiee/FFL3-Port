@@ -1,5 +1,7 @@
 #include "text.h"
 #include <cstdio>
+#include <cstdlib>
+#include <cstdio>
 
 namespace ffl3 {
 
@@ -11,7 +13,7 @@ const uint8_t kDictLow[] = {0x01, 0x02, 0x03, 0x04, 0x16, 0x17, 0x18, 0x19, 0x1a
 int argCount(uint8_t c) {
     switch (c) {
     case 0x00: case 0x05: case 0x06: case 0x07: case 0x08: case 0x0b: case 0x10: case 0x14:
-    case 0x1c: case 0x2b: case 0x2c: case 0x2d: case 0x2e: case 0x34: case 0x4b: case 0x4c:
+    case 0x1c: case 0x27: case 0x2b: case 0x2c: case 0x2d: case 0x2e: case 0x34: case 0x4b: case 0x4c:
     case 0x4d:
         return 0;
     case 0x39: return 5;
@@ -148,7 +150,7 @@ void TextBox::step() {
         case 0x1c: break;                // 27c5: wCD34 bit 1 = trim the blanks of the next name (names are trimmed anyway)
         case 0x05: case 0x4c: break;
         case 0x0c: delay_ = 2 * a[0]; return;   // 2766: pause 2 x n frames (A cuts it short)
-        case 0x11: break;                        // 2779: arrow sprite on/off (cosmetic)
+        case 0x11: break;
         case 0x27: break;                        // 2B02: wCDC1 = 1
         case 0x1f: {                     // 2955 (index via 20de): party member or story character
             int m = a[0];

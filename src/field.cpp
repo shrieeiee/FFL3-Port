@@ -331,6 +331,24 @@ void Field::runEventCommand(int cmd, int param) {
     case 0x18: if (giveItem) giveItem(rom_.b(3, uint16_t(0x762a + param - 1))); return;  // 1a02
     case 0x1c: music = uint8_t(param); return;                          // 1a28
     case 0x1d: lastSfx = uint8_t(param); if (playSfx) playSfx(param); return;                        // 1a2e
+    case 0x08: case 0x09:                                              // 14b2: sound, slide, exit
+        if (playSfx) playSfx(0x3f);
+        p.row = wrap(p.row - 1, rows());                               // 01:661C: wC6E4 -= $10
+        if (!warpByExitTable()) p.row = wrap(p.row + 1, rows());
+        return;
+    case 0x20:                                                         // 1a34: damage floor
+        if (hurtParty) hurtParty();
+        if (playSfx) playSfx(0x07);
+        return;
+    case 0x21:                                                         // 1a6d: status cured
+        if (cureParty) cureParty();
+        if (playSfx) playSfx(0x18);
+        return;
+    case 0x2d: case 0x2e: case 0x30: case 0x31: return;                // 12db: nothing
+    case 0x22:                                                         // 1a84: rest (fade, heal)
+        if (playSfx) playSfx(0x17);
+        if (healParty) healParty();
+        return;
     case 0x25: {                                                       // 1a95: Talon lift
         // Carries the leader one more block the way they face (every other use also shakes).
         const Dir d = p.facing;

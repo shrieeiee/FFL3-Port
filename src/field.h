@@ -82,7 +82,10 @@ public:
     std::function<void(int id)> playSfx;
     std::function<void(int slot, int character)> joinParty;    // event $10 1x/2x (0B:6DE4)
     std::function<void(int slot)> leaveParty;                  // event $10 0x (0B:6E33)
-    std::function<void(uint16_t addr, uint8_t v)> pokeRam;     // game RAM writes (party records, wC6xx)                       // event $1D / step sounds
+    std::function<void(uint16_t addr, uint8_t v)> pokeRam;
+    std::function<void()> healParty;                           // event $22 (01:7701)
+    std::function<void()> hurtParty;                           // event $20 (1a34): HP -2, min 1
+    std::function<void()> cureParty;                           // event $21 (1a6d -> 09:53D1)     // game RAM writes (party records, wC6xx)                       // event $1D / step sounds
     uint8_t music = 0, lastSfx = 0;                           // hCurrentMusic / hSFX
     bool noClip = false;
     bool encounters = true;                                   // random battles on (debug toggle)

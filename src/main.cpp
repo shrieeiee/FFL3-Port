@@ -312,6 +312,18 @@ int main(int argc, char** argv) {
         }
         for (int i = 0; i < 4; i++) battleRam[size_t(0xce00 + slot * 4 + i)] = 0;
     };
+    field.healParty = [&] {                    // 01:7701: living members back to full HP / MP
+        const int n = party[4].raw[3] == 0xff ? 4 : 5;
+        for (int i = 0; i < n; i++)
+            if (!(party[size_t(i)].raw[1] & 0x40)) { party[size_t(i)].setMp(party[size_t(i)].maxMp()); party[size_t(i)].setHp(party[size_t(i)].maxHp()); }
+    };
+    field.hurtParty = [&] {
+        for (int i = 0; i < 5; i++) {
+            const int hp = party[size_t(i)].hp() - 2;
+            party[size_t(i)].setHp(hp <= 0 ? 1 : hp);
+        }
+    };
+    field.cureParty = [&] { for (int i = 0; i < 5; i++) party[size_t(i)].raw[1] = 0; };
     field.leaveParty = [&](int slot) { party[size_t(slot)].raw[3] = 0xff; };   // 0B:6E33: +3 = $FF
     field.openShop = openShop;
     std::unique_ptr<FieldMenu> menu;
