@@ -44,6 +44,10 @@ bool Field::enterMap(int map, int row, int col, Dir facing) {
         a.col = wrap(o.col, cols());
         a.facing = Dir(((o.flagsY >> 7) << 1) | (o.flagsX >> 7));   // wC2D0 bits 7-6 (b2 bit 7 = high bit; checked vs RAM)
         a.spriteTile = o.spriteTile();
+        if (o.kind == 1 && o.id && o.id - 1 < 0x80 && flags_.chest.test(size_t(o.id - 1))) {   // opened chest
+            a.obj.sprite = 0x78;
+            a.spriteTile = a.obj.spriteTile();
+        }
         if ((o.kind == 2 || (o.kind == 0 && o.id >= 0xdf)) && slot < kSlots) {
             Actor& c = actors_[size_t(slot++)];
             c = a;
@@ -312,6 +316,12 @@ void Field::runEventCommand(int cmd, int param) {
         lastEvent_ = buf;
         return;
     }
+}
+
+void Field::openChest(int slot) {             // 00:0A08: the object's sprite becomes $78
+    Actor& a = actors_[size_t(slot)];
+    a.obj.sprite = 0x78;
+    a.spriteTile = a.obj.spriteTile();
 }
 
 } // namespace ffl3

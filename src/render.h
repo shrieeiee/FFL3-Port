@@ -4,6 +4,7 @@
 #include "field.h"
 #include "text.h"
 #include "battle.h"
+#include "shop.h"
 
 namespace ffl3 {
 
@@ -43,6 +44,9 @@ struct BattleGfx {
 
 // Battle screen: pictures on BG rows 0-7 (blank tile $FF elsewhere), the window from WY down,
 // then OBJs. Font / frame tiles come from the shared set at $8800 (tc.bg[$80-$FF]).
+// Shop / inn window over the field.
+void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Frame& out);
+
 void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 } // namespace ffl3

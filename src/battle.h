@@ -19,6 +19,9 @@ namespace ffl3 {
 // values left over from the previous fight (last commands, message state).
 using BattleRam = std::array<uint8_t, 0x10000>;
 void initBattleRam(BattleRam& ram);   // power-on state: WRAM cleared + the few leftovers set
+// 0B:7037: add one of item `id` to the inventory at wC6FF (24 pairs, max 9 each).
+// Returns the new count, or -1 when it doesn't fit.
+int inventoryAdd(BattleRam& ram, uint8_t id);
 
 struct BattleContext {
     std::array<uint8_t, 32> eventFlags{};   // wC760, MSB-first
@@ -77,7 +80,9 @@ private:
     std::vector<int> aliveGroups() const;
     Glyphs combatantName(int idx) const;
 
-    void setup(int hffca, const BattleContext& ctx);
+    void setup(int hffca, const BattleContext& ctx, bool retry = false);
+    BattleContext ctx_;
+    int hffca_ = 0;
     void runVm();
     bool native(uint16_t addr);
     uint8_t rand8();

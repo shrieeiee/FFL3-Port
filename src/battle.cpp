@@ -39,7 +39,22 @@ void initBattleRam(BattleRam& ram) {
     ram[0xce8c] = 0xff;
     for (int i = 0; i < 5; i++) { ram[size_t(0xce02 + i * 4)] = 0xff; ram[size_t(0xce03 + i * 4)] = 0xff; }
     for (int i = 0; i < 48; i++) ram[size_t(0xc6ff + i)] = 0xff;   // inventory: 24 (id, count)
-    ram[0xc6ff] = 0xe6; ram[0xc700] = 0x01;      // what a new game carries
+    ram[0xc6ff] = 0xe6; ram[0xc700] = 0x01;      // what a new game carries (Radar)
+    ram[0xc6e0] = 0xc0; ram[0xc6e1] = 0x03;      // 960 GP, the gold after the opening
+}
+
+int inventoryAdd(BattleRam& ram, uint8_t id) {
+    for (int i = 0; i < 24; i++) {
+        const size_t hl = size_t(0xc6ff + i * 2);
+        if (ram[hl] != id) continue;
+        if (ram[hl + 1] >= 9) return -1;
+        return ++ram[hl + 1];
+    }
+    for (int i = 0; i < 24; i++) {
+        const size_t hl = size_t(0xc6ff + i * 2);
+        if (ram[hl] == 0xff) { ram[hl] = id; ram[hl + 1] = 1; return 1; }
+    }
+    return -1;
 }
 
 Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, const BattleContext& ctx, int hffca, uint32_t seed)
@@ -47,6 +62,8 @@ Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, c
     vm_.mem = ram_;
     vm_.mem[0xff90] = uint8_t(seed);
     vm_.mem[0xff93] = uint8_t(seed >> 8);
+    ctx_ = ctx;
+    hffca_ = hffca;
     setup(hffca, ctx);
     vm_.native = [this](uint16_t a) { return native(a); };
     vm_.random = [this](uint8_t n) { return rnd(n); };
@@ -76,7 +93,7 @@ uint8_t Battle::rnd(uint8_t n) {
 }
 
 // What 0B:4000 / 405A / 4444 set up before entering the VM at 0C:4A2D.
-void Battle::setup(int hffca, const BattleContext& ctx) {
+void Battle::setup(int hffca, const BattleContext& ctx, bool retry) {
     auto& M = vm_.mem;
     for (size_t i = 0; i < 5; i++) {
         const uint16_t base = uint16_t(0xc500 + i * 0x60);
@@ -87,9 +104,11 @@ void Battle::setup(int hffca, const BattleContext& ctx) {
     M[0xc6e3] = uint8_t(ctx.vehicle);
     M[0xca2d] = uint8_t(ctx.area);
 
-    form_ = loadFormation(rom_, hffca & 0x7f);
-    layout_ = layoutEnemies(rom_, form_, (hffca & 0x80) != 0, [this](int n) { return rnd(uint8_t(n)); });
-    for (int g = 0; g < 3; g++) groups_.push_back(form_.ids[g] == 0xff ? Monster{} : loadMonster(rom_, form_.ids[g]));
+    if (!retry) {                                      // a retry keeps the same monsters (0B:5A18)
+        form_ = loadFormation(rom_, hffca & 0x7f);
+        layout_ = layoutEnemies(rom_, form_, (hffca & 0x80) != 0, [this](int n) { return rnd(uint8_t(n)); });
+        for (int g = 0; g < 3; g++) groups_.push_back(form_.ids[g] == 0xff ? Monster{} : loadMonster(rom_, form_.ids[g]));
+    }
     for (int i = 0; i < 3; i++) M[size_t(0xcc59 + i)] = uint8_t(form_.ids[i]);
     M[0xcc5c] = form_.flags;
     M[0xcc5d] = form_.counts;
@@ -104,6 +123,7 @@ void Battle::setup(int hffca, const BattleContext& ctx) {
     battleSetupCombatants(vm_, rom_);
     M[0xddff] = M[0xd203] == 0xff ? 4 : 5;
     std::copy(M.begin() + 0xc6e0, M.begin() + 0xc740, M.begin() + 0xdd00);
+    M[0xceda] = 0;
     vm_.start(0x4a2d);
 }
 
@@ -165,9 +185,16 @@ bool Battle::native(uint16_t addr) {
         state_ = State::FightMenu;
         cursor_ = 0;
         return false;
-    case 0x1d77:                                       // defeat: retry menu - give up (wCEDA)
+    case 0x1d77:                                       // after a defeat (0B:5CDF)
         vm_.mem[0xce88] = 2;
-        vm_.mem[0xceda] = 0;
+        if (vm_.mem[0xceda] != 0xff)                   // no retry: fallen members get up with 1 HP
+            for (int i = 0; i < 5; i++) {
+                const uint16_t r = uint16_t(0xc500 + i * 0x60);
+                if ((vm_.mem[uint16_t(r + 1)] & 0x80) || !(vm_.mem[uint16_t(r + 0x10)] | vm_.mem[uint16_t(r + 0x11)])) {
+                    vm_.mem[uint16_t(r + 0x10)] = 1; vm_.mem[uint16_t(r + 0x11)] = 0;
+                }
+                vm_.mem[uint16_t(r + 1)] &= 0x40;
+            }
         return true;
     case 0x5fb7:                                       // print battle message wCE8D/8E
         showMessage();
@@ -175,6 +202,7 @@ bool Battle::native(uint16_t addr) {
         return false;
     case 0x6001: case 0x6b68: case 0x6b6c: case 0x6b71: case 0x6b7f:   // animations / sound
         timer_ = 16;
+        if (m(0xc9de) >= 5 && m(0xc9de) < 13) { flashSlot_ = m(0xc9de) - 5; flashTimer_ = 16; }   // blink the target
         state_ = State::Wait;
         return false;
     default:
@@ -250,6 +278,13 @@ void Battle::finishCommands(bool run) {
 }
 
 void Battle::endBattle() {
+    if (vm_.mem[0xceda] == 0xff) {                     // 00:1126: the party was beaten - fight again
+        lines_.clear(); cur_.clear();
+        setup(hffca_, ctx_, true);
+        state_ = State::Intro;
+        timer_ = 30;
+        return;
+    }
     state_ = State::Done;
     ram_ = vm_.mem;
     for (size_t i = 0; i < party_.size() && i < 5; i++)
@@ -403,7 +438,11 @@ void Battle::openList(int command) {
     } else if (command == 2) {                            // spells: bits at +$51-56 (09:51EA)
         for (int k = 0; k < 6; k++)
             for (int bit = 0; bit < 8; bit++)
-                if (m(uint16_t(r + 0x51 + k)) & (0x80 >> bit)) list_.push_back({uint8_t((k ^ 1) * 8 + 7 - bit), -1, -1});
+                if (m(uint16_t(r + 0x51 + k)) & (0x80 >> bit)) {
+                    const uint8_t id = uint8_t((k ^ 1) * 8 + 7 - bit);
+                    itemKind(id, 0, 0);
+                    list_.push_back({id, m(0xce29), -1});      // MP cost (wCE29)
+                }
     } else {                                              // inventory wC6FF
         for (int i = 0; i < 24; i++) {
             const uint8_t id = m(uint16_t(0xc6ff + i * 2));
@@ -538,7 +577,8 @@ void Battle::statusPanel(BattleView& v, int hideCol) const {
 BattleView Battle::view() const {
     BattleView v;
     v.win.fill(0xff);
-    for (size_t s = 0; s < layout_.slots.size(); s++) if (enemyAlive(int(s))) v.visibleSlots.push_back(int(s));
+    for (size_t s = 0; s < layout_.slots.size(); s++)
+        if (enemyAlive(int(s)) && !(int(s) == flashSlot_ && (flashTimer_ & 4))) v.visibleSlots.push_back(int(s));
     auto brackets = [&v](int x0, int y0, int x1, int y1) {
         v.objs.push_back({x0, y0, kBracket, false, false});
         v.objs.push_back({x1 - 8, y0, kBracket, true, false});

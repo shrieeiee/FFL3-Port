@@ -1,15 +1,17 @@
-// FFL3 / SaGa 3 PC port - milestone 5: walk, talk, events and battles.
+// FFL3 / SaGa 3 PC port: walk, talk, events, chests, battles, save/load.
 //
 //   ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--walk UDLR...] [--shot out.bmp]
 //                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N]
 //
 // Keys: arrows/WASD walk, Z/Space/Enter = A, X/Backspace = B, F1 collision overlay, F2 no-clip,
-//       F3 random battles on/off, F4 start a random battle here, Tab wide/GB view,
+//       F3 random battles on/off, F4 start a random battle here, F5 save / F9 load (ffl3.sav),
+//       Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "render.h"
 #include <SDL.h>
 #include <algorithm>
 #include <memory>
+#include <cstring>
 #include <iterator>
 #include <cstdio>
 #include <cstdlib>
@@ -61,7 +63,8 @@ int nextValid(const Rom& rom, int from, int dir) {
 }
 
 // What happens when A is pressed at an object (00:097f, by object kind wC350).
-void talk(const Rom& rom, Field& field, TextBox& tb) {
+void talk(const Rom& rom, Field& field, TextBox& tb, const std::function<void(int slot, const MapObject&)>& chest,
+          const std::function<void(int)>& shop) {
     const int i = field.faceObjectInFront();
     if (i < 0) return;
     const MapObject& o = field.actors()[size_t(i)].obj;
@@ -75,9 +78,12 @@ void talk(const Rom& rom, Field& field, TextBox& tb) {
         if (o.id == 0 || o.id >= 9) return;
         tb.open(0xa, rom.ptr(0xa, 0x791e, o.id - 1));
         break;
-    default:                                         // 1 = chest (00:09d4), 2 = shop (0A:6FD4)
-        std::snprintf(buf, sizeof buf, "%s %02X (not implemented)", o.kind == 1 ? "chest" : "shop", o.id);
-        field.setLastEvent(buf);
+    case 1:                                          // 00:09D7 - chest
+        chest(i, o);
+        break;
+    default:                                         // 2 = shop (00:0A31 -> 01:6FD4, wCA2F = id - 1)
+        (void)buf;
+        if (o.id) shop(o.id - 1);
         break;
     }
 }
@@ -95,7 +101,7 @@ int dirFromChar(char c) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string romPath = "saga3.gb", shot, dumpTiles, walk;
+    std::string romPath = "saga3.gb", shot, dumpTiles, walk, savePath, loadPath;
     int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
     std::string keys, dumpView, ramPokes;
     int mapId = -1, scale = 5, startRow = -1, startCol = -1;
@@ -105,6 +111,8 @@ int main(int argc, char** argv) {
         if (a == "--map" && i + 1 < argc) mapId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--pos" && i + 1 < argc) std::sscanf(argv[++i], "%d,%d", &startRow, &startCol);
         else if (a == "--walk" && i + 1 < argc) walk = argv[++i];
+        else if (a == "--save" && i + 1 < argc) savePath = argv[++i];   // after --walk
+        else if (a == "--load" && i + 1 < argc) loadPath = argv[++i];
         else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-text" && i + 1 < argc) runTextId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
@@ -169,26 +177,91 @@ int main(int argc, char** argv) {
         char b[64]; std::snprintf(b, sizeof b, "battle: formation %02X%s", hffca & 0x7f, hffca & 0x80 ? " (fixed)" : "");
         field.setLastEvent(b);
     };
-    // After a battle: back to the field, or (all down) back to the start like a game over.
+    // After a battle: back to the field. (Random fights you lose are retried by the battle itself.)
     auto finishBattle = [&] {
         const Battle::Result r = battle->result();
         battle.reset();
-        if (r == Battle::Result::Lost) {
-            newParty();
-            initBattleRam(battleRam);
-            text.close();
-            field.enterMap(0x0b, 26, 7, Dir::Up);
-            field.setLastEvent("party defeated - back to the start");
+        if (r == Battle::Result::Lost) {               // story fights you can lose: carry on at 1 HP
+            field.setLastEvent("party defeated");
         } else {
             field.setLastEvent(r == Battle::Result::Won ? "battle won" : "ran away");
         }
     };
-    field.giveItem = [&](int item) {
-        char b[64]; std::snprintf(b, sizeof b, "got item %02X", item);
-        field.setLastEvent(b);
+    // 0B:6D63: put an item in the bag and say so (09:724E "Received X.", 09:731A when full).
+    auto receive = [&](int item) {
+        text.itemArg = item;
+        const int n = inventoryAdd(battleRam, uint8_t(item));
+        text.open(9, n >= 0 ? 0x724e : 0x731a);
+    };
+    field.giveItem = [&](int item) { receive(item); };
+    // Save file: "FFL3SAV1", map, row, col, facing, vehicle, event + chest flags (32 bytes
+    // each, MSB first), 5 party records, then the whole battle RAM image (inventory etc.).
+    auto saveGame = [&](const char* path) {
+        FILE* f = std::fopen(path, "wb");
+        if (!f) return false;
+        std::fwrite("FFL3SAV1", 1, 8, f);
+        const Actor& p = field.player();
+        const uint8_t hdr[5] = {uint8_t(field.mapId()), uint8_t(p.row), uint8_t(p.col), uint8_t(p.facing), uint8_t(field.vehicle())};
+        std::fwrite(hdr, 1, 5, f);
+        for (const auto* bits : {&flags.event, &flags.chest})
+            for (int i = 0; i < 32; i++) {
+                uint8_t b = 0;
+                for (int k = 0; k < 8; k++) if (bits->test(size_t(i * 8 + k))) b |= uint8_t(0x80 >> k);
+                std::fputc(b, f);
+            }
+        for (int i = 0; i < 5; i++) {
+            if (size_t(i) < party.size()) std::fwrite(party[size_t(i)].raw.data(), 1, 0x60, f);
+            else for (int k = 0; k < 0x60; k++) std::fputc(0xff, f);
+        }
+        std::fwrite(battleRam.data(), 1, battleRam.size(), f);
+        std::fclose(f);
+        return true;
+    };
+    auto loadGame = [&](const char* path) {
+        FILE* f = std::fopen(path, "rb");
+        if (!f) return false;
+        char magic[8];
+        uint8_t hdr[5], fl[64];
+        std::array<uint8_t, 5 * 0x60> recs{};
+        static BattleRam tmp;
+        const bool ok = std::fread(magic, 1, 8, f) == 8 && !std::memcmp(magic, "FFL3SAV1", 8) &&
+                        std::fread(hdr, 1, 5, f) == 5 && std::fread(fl, 1, 64, f) == 64 &&
+                        std::fread(recs.data(), 1, recs.size(), f) == recs.size() &&
+                        std::fread(tmp.data(), 1, tmp.size(), f) == tmp.size();
+        std::fclose(f);
+        if (!ok) return false;
+        flags.event.reset(); flags.chest.reset();
+        for (int i = 0; i < 256; i++) {
+            if (fl[i / 8] & (0x80 >> (i % 8))) flags.event.set(size_t(i));
+            if (fl[32 + i / 8] & (0x80 >> (i % 8))) flags.chest.set(size_t(i));
+        }
+        party.clear();
+        for (int i = 0; i < 5; i++) {
+            CharRecord c;
+            std::copy(recs.begin() + i * 0x60, recs.begin() + (i + 1) * 0x60, c.raw.begin());
+            if (c.raw[3] != 0xff || i < 4) party.push_back(c);
+        }
+        battleRam = tmp;
+        battle.reset();
+        text.close();
+        field.setVehicle(hdr[4]);
+        field.enterMap(hdr[0], hdr[1], hdr[2], Dir(hdr[3] & 3));
+        return true;
+    };
+    std::unique_ptr<Shop> shop;
+    auto openShop = [&](int id) { shop = std::make_unique<Shop>(rom, battleRam, party, id); };
+    field.openShop = openShop;
+    auto chest = [&](int slot, const MapObject& o) {           // 00:09D7
+        const int k = o.id - 1;
+        if (o.id == 0 || k >= 0x80 || flags.chest.test(size_t(k))) { text.open(1, 0x611d); return; }   // "Empty"
+        receive(rom.b(3, uint16_t(0x762a + k)));
+        flags.chest.set(size_t(k));
+        field.openChest(slot);
     };
     text.log = [&](const std::string& m) { field.setLastEvent(m); };
-    if (mapId < 0) {                                  // new game
+    if (!loadPath.empty()) {
+        if (!loadGame(loadPath.c_str())) { std::fprintf(stderr, "can't load %s\n", loadPath.c_str()); return 1; }
+    } else if (mapId < 0) {                                  // new game
         field.enterMap(0x0b, startRow >= 0 ? startRow : 26, startCol >= 0 ? startCol : 7, Dir::Up);
     } else {
         if (mapId < 6) field.setVehicle(2);            // debug jump straight onto a world map
@@ -336,7 +409,7 @@ int main(int argc, char** argv) {
     }
 
     // ---- headless: tests / tooling ----------------------------------------------------
-    if (!dumpTiles.empty() || !shot.empty() || !walk.empty()) {
+    if (!dumpTiles.empty() || !shot.empty() || !walk.empty() || !savePath.empty()) {
         if (!dumpTiles.empty()) {
             FILE* f = std::fopen(dumpTiles.c_str(), "wb");
             if (!f) return 1;
@@ -345,9 +418,16 @@ int main(int argc, char** argv) {
         }
         // Script: U/D/L/R step, A = press A (talk / advance text) then 40 frames, W = 60 frames.
         for (char c : walk) {
+            if (shop) {                                 // A / B / U / D drive an open shop
+                ShopInput in;
+                in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
+                shop->tick(in);
+                if (shop->done()) shop.reset();
+                continue;
+            }
             if (c == 'A' || c == 'a') {
                 if (text.active()) text.tick(true, true, false, false);
-                else talk(rom, field, text);
+                else talk(rom, field, text, chest, openShop);
                 for (int i = 0; i < 40; i++) { field.tick(-1); text.tick(false, false, false, false); }
                 continue;
             }
@@ -364,9 +444,12 @@ int main(int argc, char** argv) {
                 field.lastEvent().rfind("battle", 0) == 0)
                 std::printf("  step %c: %s\n", c, field.lastEvent().c_str()), field.setLastEvent("");
         }
+        if (!savePath.empty() && !saveGame(savePath.c_str())) return 1;
+        if (shop) std::printf("shop open, gold %d\n", shop->gold());
         if (!shot.empty()) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
             renderTextBox(text, tiles, opts, frame);
+            if (shop) renderShop(*shop, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
             if (!saveBmp(argb, frame.w, frame.h, shot.c_str())) return 1;
         }
@@ -417,6 +500,8 @@ int main(int argc, char** argv) {
             }
             case SDLK_F1: debug = !debug; break;
             case SDLK_F2: field.noClip = !field.noClip; break;
+            case SDLK_F5: field.setLastEvent(saveGame("ffl3.sav") ? "saved to ffl3.sav" : "save failed"); break;
+            case SDLK_F9: field.setLastEvent(loadGame("ffl3.sav") ? "loaded ffl3.sav" : "no save (ffl3.sav)"); break;
             case SDLK_F3: field.encounters = !field.encounters;
                 field.setLastEvent(field.encounters ? "random battles on" : "random battles off"); break;
             case SDLK_F4: if (!battle) field.startBattle(randomFormation(rom, field.encounterArea(), field.vehicle(), field.random8())); break;
@@ -449,7 +534,12 @@ int main(int argc, char** argv) {
             const bool aPressed = aHeld && !aPrev;
             const bool bHeld = k[SDL_SCANCODE_X] || k[SDL_SCANCODE_BACKSPACE];
             const bool left = d == int(Dir::Left), right = d == int(Dir::Right);
-            if (battle) {
+            if (shop) {
+                ShopInput in;
+                in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
+                shop->tick(in);
+                if (shop->done()) shop.reset();
+            } else if (battle) {
                 BattleInput in;
                 in.a = aPressed; in.aHeld = aHeld; in.b = bHeld && !bPrev;
                 in.up = up && !upPrev; in.down = down && !downPrev;
@@ -460,7 +550,7 @@ int main(int argc, char** argv) {
                 field.tick(-1);                      // scripted actor moves animate under text
                 text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
             } else {
-                if (aPressed && !field.player().moveFrames) talk(rom, field, text);
+                if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
                 else field.tick(d);
             }
             aPrev = aHeld; upPrev = up; downPrev = down; bPrev = bHeld; leftPrev = left; rightPrev = right;
@@ -472,6 +562,7 @@ int main(int argc, char** argv) {
         } else {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
             renderTextBox(text, tiles, opts, frame);
+            if (shop) renderShop(*shop, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         }
         if (!tex || texW != frame.w) {

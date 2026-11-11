@@ -49,6 +49,7 @@ public:
     const MapHeader& header() const { return hdr_; }
     const GfxSet& gfx() const { return gfx_; }
     const std::array<Actor, 16>& actors() const { return actors_; }
+    void openChest(int slot);
     const Actor& player() const { return actors_[0]; }
     const std::array<std::array<uint8_t, 16>, 128>& objTiles() const { return objTiles_; }
     const std::array<std::array<uint8_t, 4>, 64>& blockDefs() const { return blockDefs_; }

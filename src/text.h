@@ -51,6 +51,7 @@ public:
 
     GameFlags* flags = nullptr;
     std::array<std::string, 4> partyNames{{"Arthur", "Curtis", "Sharon", "Gloria"}};
+    int itemArg = -1;                                   // wCE94 for the $1E item-name code
     std::function<void(int cmd, int param)> onEvent;   // event command refs (hi < $40)
     std::function<void(const std::string&)> log;
     std::function<bool()> isBusy;                      // scripts wait for actor moves

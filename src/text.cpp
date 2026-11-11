@@ -145,7 +145,7 @@ void TextBox::step() {
         case 0x0b: state_ = State::WaitA; return;
         case 0x08: state_ = State::WaitA; clearOnResume_ = true; return;   // 274d: wait, then 27ab
         case 0x07: case 0x14: clear(); break;
-        case 0x1c: state_ = State::WaitA; return;     // 27c5: page break before a new speaker
+        case 0x1c: break;                // 27c5: wCD34 bit 1 = trim the blanks of the next name (names are trimmed anyway)
         case 0x05: case 0x4c: break;
         case 0x1f: {                     // 2955 (index via 20de): party member or story character
             int m = a[0];
@@ -201,6 +201,15 @@ void TextBox::step() {
             const bool spell = a[0] < 0x30;
             const uint16_t p = spell ? uint16_t(0x6d9b + a[0] * 6) : uint16_t(0x6ebb + (a[0] - 0x30) * 8);
             for (int i = 0; i < (spell ? 6 : 8); i++) putGlyph(rom_.b(0xe, uint16_t(p + i)));
+            break;
+        }
+        case 0x1e: {                     // name of the item in wCE94 (chests, shops), trailing blanks cut
+            if (itemArg < 0 || itemArg == 0xff) break;
+            const bool spell = itemArg < 0x30;
+            const uint16_t p = spell ? uint16_t(0x6d9b + itemArg * 6) : uint16_t(0x6ebb + (itemArg - 0x30) * 8);
+            int n = spell ? 6 : 8;
+            while (n > 0 && rom_.b(0xe, uint16_t(p + n - 1)) == 0xff) n--;
+            for (int i = 0; i < n; i++) putGlyph(rom_.b(0xe, uint16_t(p + i)));
             break;
         }
         default:

@@ -138,6 +138,21 @@ void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, 
     }
 }
 
+void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Frame& out) {
+    const int x0 = (out.w - 160) / 2;
+    const auto s = shop.screen();
+    for (int r = 0; r < 18; r++)
+        for (int c = 0; c < 20; c++)
+            if (s[size_t(r * 20 + c)]) drawBgTile(tc, o.bgp, out, x0 + c * 8, r * 8, s[size_t(r * 20 + c)]);
+    const int cr = shop.cursorRow();
+    if (cr >= 0) {
+        const auto& t = tc.obj[0x7e];
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++)
+                if (t[size_t(y * 8 + x)]) out.px[size_t(cr * 8 + y) * size_t(out.w) + size_t(x0 + 8 * shop.cursorCol() - 8 + x)] = uint8_t((o.obp >> (t[size_t(y * 8 + x)] * 2)) & 3);
+    }
+}
+
 // ---- battle --------------------------------------------------------------------------------
 
 void BattleGfx::build(const Rom& rom, const Battle& b) {
