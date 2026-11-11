@@ -63,6 +63,7 @@ public:
     bool finished() const { return state_ == State::Done; }
 
     const Formation& formation() const { return form_; }
+    std::function<void(int id)> playSfx;   // sound effects the battle bytecode requests (hFFBC)
     const EnemyLayout& layout() const { return layout_; }
     const std::vector<Monster>& monsters() const { return groups_; }   // per group
     int enemyHp(int slot) const;

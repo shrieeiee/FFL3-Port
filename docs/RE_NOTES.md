@@ -263,3 +263,20 @@ name codes: $1F $FF = combatant wCD36 (party 0-4, enemies $80+k = slot k+5), $1F
 combatant wCD4C, $1E $80 = the name in wCE3C (built by 6B41), $30 = a number. A turn's
 messages accumulate in a 2-line window (WY 88) and scroll. Ids: $34 "X used / Y against",
 $35 "Z.", $3E "A mighty blow!", $1D "X fell.", $40 "Missed!", $43 "Won!", $06/$07 run.
+
+## Sound (bank 0F)
+
+Driver at 0F:4000 (per frame, from vblank) / 0F:4003 (init). hFFBA = song request (0 stop,
+1-20 via 0F:482F: 4 channel pointers each), hFFBB = current song, hFFBC = SFX request (1-65,
+pulse-1 script 0F:66F2, noise script 0F:6774). A song change is only taken while no SFX is
+playing. Channel blocks wCB02 (pulse 2), wCB1A (pulse 1), wCB32 (wave), wCB4A (noise):
++0/+1 loop counters, +3 status (FF = ended), +4 note countdown, +5 note, +6 octave offset,
++7 data pointer. Tempo: wCB00 += wCB01, notes advance twice on carry. Note byte: low nibble =
+length (0F:41BE), high nibble = note (0-B pitch via 0F:4114, C rest, D off); E0-EF octave;
+F0-FF commands (tables 0F:4428/4448/4468/4488). Effects run on a 3-frame rotation.
+SFX script entries: delay, then 5 bytes NR10-14 (pulse) / NR42, NR43 (noise); F0-FE set a
+repeat count, EF xx xx loops, 00 ends and restores the music channel (40DD / 40FD).
+Game-side writers: map header byte 4 & $1F (1F = keep), event $1C/$1D, 00:10D7 (battle:
+save + stop music, $36 encounter), 0B:4000 battle song = ((wCC5C >> 4) & 3) + 1, the battle
+bytecode writes hFFBC itself, 0B:6D63 receive ($35 / $3D for D8-E9 / $3B full), 00:1E7C $3A
+OK, 00:1E83 $3B error.

@@ -1,13 +1,16 @@
 // FFL3 / SaGa 3 PC port: walk, talk, events, chests, battles, save/load.
 //
 //   ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--walk UDLR...] [--shot out.bmp]
-//                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N]
+//                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N] [--mute]
+//                 [--wav music|sfx HEXID SECONDS]  (renders ffl3.wav and exits)
 //
 // Keys: arrows/WASD walk, Z/Space/Enter = A, X/Backspace = B, F1 collision overlay, F2 no-clip,
 //       M / Shift field menu (Equip, Items, Status, Save), F3 random battles on/off, F4 start a random battle here, F5 save / F9 load (ffl3.sav),
 //       Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "render.h"
+#include "sound.h"
+#include <functional>
 #include <SDL.h>
 #include <algorithm>
 #include <memory>
@@ -105,7 +108,10 @@ int main(int argc, char** argv) {
     int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
     std::string keys, dumpView, ramPokes;
     int mapId = -1, scale = 5, startRow = -1, startCol = -1;
-    bool wide = false, debug = false, showSlots = false;
+    bool wide = false, debug = false, showSlots = false, mute = false;
+    std::string wavKind;
+    int wavId = 0;
+    double wavSecs = 0;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--map" && i + 1 < argc) mapId = int(std::strtol(argv[++i], nullptr, 16));
@@ -125,6 +131,10 @@ int main(int argc, char** argv) {
         else if (a == "--scale" && i + 1 < argc) scale = std::max(1, std::atoi(argv[++i]));
         else if (a == "--wide") wide = true;
         else if (a == "--debug") debug = true;
+        else if (a == "--mute") mute = true;
+        else if (a == "--wav" && i + 3 < argc) {      // --wav music|sfx ID SECONDS (writes ffl3.wav)
+            wavKind = argv[++i]; wavId = int(std::strtol(argv[++i], nullptr, 16)); wavSecs = std::atof(argv[++i]);
+        }
         else if (a == "--slots") showSlots = true;
         else if (a.size() > 2 && a[0] == '-' && a[1] == '-') { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
         else romPath = a;
@@ -138,6 +148,25 @@ int main(int argc, char** argv) {
             (err + "\n\nPut your Final Fantasy Legend III (U) ROM next to the exe as saga3.gb,\n"
                    "or drag it onto the exe.").c_str(), nullptr);
         return 1;
+    }
+
+    // ---- headless: render a song or sound effect to ffl3.wav (16-bit stereo, 48 kHz) --------
+    if (!wavKind.empty()) {
+        SoundSystem snd(rom, 48000);
+        if (wavKind == "music") snd.music(wavId); else snd.sfx(wavId);
+        std::vector<float> buf(size_t(wavSecs * 48000) * 2);
+        snd.render(buf.data(), int(buf.size() / 2));
+        FILE* f = std::fopen("ffl3.wav", "wb");
+        if (!f) return 1;
+        auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
+        auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
+        const uint32_t bytes = uint32_t(buf.size() * 2);
+        std::fwrite("RIFF", 1, 4, f); u32(36 + bytes); std::fwrite("WAVEfmt ", 1, 8, f);
+        u32(16); u16(1); u16(2); u32(48000); u32(48000 * 4); u16(4); u16(16);
+        std::fwrite("data", 1, 4, f); u32(bytes);
+        for (float x : buf) u16(uint16_t(int16_t(std::max(-1.f, std::min(1.f, x)) * 32767)));
+        std::fclose(f);
+        return 0;
     }
 
     GameFlags flags;
@@ -158,6 +187,10 @@ int main(int argc, char** argv) {
     std::vector<CharRecord> party;
     auto newParty = [&] { party.clear(); for (int i = 0; i < 5; i++) party.push_back(loadCharacter(rom, i)); };
     newParty();
+    // Sound: set up for the interactive window (no-ops headless). Requests mirror the game's
+    // hFFBA (music) / hFFBC (SFX) writes.
+    std::function<void(int)> sndMusic = [](int) {}, sndSfx = [](int) {};
+    int curMusic = -1;
     static BattleRam battleRam;                     // the GB's RAM as battles see it, kept across fights
     initBattleRam(battleRam);
     std::unique_ptr<Battle> battle;
@@ -173,6 +206,10 @@ int main(int argc, char** argv) {
         ctx.vehicle = field.vehicle();
         ctx.area = field.encounterArea();
         battle = std::make_unique<Battle>(rom, battleRam, party, ctx, hffca, battleSeed++ * 2654435761u);
+        battle->playSfx = [&](int id) { sndSfx(id); };
+        sndMusic(0);                                    // 00:10D7 stop the field music,
+        sndSfx(0x36);                                   // 00:10E1 encounter sound
+        curMusic = 0;                                   // battle music follows (0B:4000)
         bgfx.build(rom, *battle);
         char b[64]; std::snprintf(b, sizeof b, "battle: formation %02X%s", hffca & 0x7f, hffca & 0x80 ? " (fixed)" : "");
         field.setLastEvent(b);
@@ -192,6 +229,7 @@ int main(int argc, char** argv) {
         text.itemArg = item;
         const int n = inventoryAdd(battleRam, uint8_t(item));
         text.open(9, n >= 0 ? 0x724e : 0x731a);
+        sndSfx(n < 0 ? 0x3b : item >= 0xd8 && item < 0xea ? 0x3d : 0x35);   // 0B:6D7E
     };
     field.giveItem = [&](int item) { receive(item); };
     // Save file: "FFL3SAV1", map, row, col, facing, vehicle, event + chest flags (32 bytes
@@ -249,7 +287,11 @@ int main(int argc, char** argv) {
         return true;
     };
     std::unique_ptr<Shop> shop;
-    auto openShop = [&](int id) { shop = std::make_unique<Shop>(rom, battleRam, party, id); };
+    auto openShop = [&](int id) {
+        shop = std::make_unique<Shop>(rom, battleRam, party, id);
+        shop->playSfx = [&](int sid) { sndSfx(sid); };
+    };
+    field.playSfx = [&](int id) { sndSfx(id); };
     field.openShop = openShop;
     std::unique_ptr<FieldMenu> menu;
     auto openMenu = [&] { menu = std::make_unique<FieldMenu>(rom, battleRam, party, [&] { return saveGame("ffl3.sav"); }); };
@@ -483,6 +525,24 @@ int main(int argc, char** argv) {
 
     // ---- interactive ------------------------------------------------------------------
     if (SDL_Init(SDL_INIT_VIDEO) != 0) { std::fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    // Audio: the sound driver + APU run in the SDL audio callback, one driver frame per GB frame.
+    static std::unique_ptr<SoundSystem> sound;
+    SDL_AudioDeviceID adev = 0;
+    if (!mute && SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
+        sound = std::make_unique<SoundSystem>(rom, 48000);
+        SDL_AudioSpec want{}, have{};
+        want.freq = 48000; want.format = AUDIO_F32SYS; want.channels = 2; want.samples = 1024;
+        want.callback = [](void* u, Uint8* buf, int len) { static_cast<SoundSystem*>(u)->render(reinterpret_cast<float*>(buf), len / 8); };
+        want.userdata = sound.get();
+        adev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+        if (adev) {
+            sndMusic = [&](int id) { SDL_LockAudioDevice(adev); sound->music(id); SDL_UnlockAudioDevice(adev); };
+            sndSfx = [&](int id) { SDL_LockAudioDevice(adev); sound->sfx(id); SDL_UnlockAudioDevice(adev); };
+            SDL_PauseAudioDevice(adev, 0);
+        } else {
+            std::fprintf(stderr, "no audio: %s\n", SDL_GetError());
+        }
+    }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     SDL_Window* win = SDL_CreateWindow("FFL3", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        frame.w * scale, frame.h * scale, SDL_WINDOW_RESIZABLE);
@@ -573,6 +633,8 @@ int main(int argc, char** argv) {
                 if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
                 else field.tick(d);
             }
+            const int wantMusic = battle ? battle->formation().music() : field.music;   // 0B:4000 / map header
+            if (wantMusic != curMusic) { curMusic = wantMusic; sndMusic(wantMusic); }
             aPrev = aHeld; upPrev = up; downPrev = down; bPrev = bHeld; leftPrev = left; rightPrev = right;
         }
         refreshTiles();
@@ -605,6 +667,7 @@ int main(int argc, char** argv) {
                       debug ? " [collision]" : "", field.lastEvent().c_str());
         if (lastTitle != title) { SDL_SetWindowTitle(win, title); lastTitle = title; }
     }
+    if (adev) SDL_CloseAudioDevice(adev);
     if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

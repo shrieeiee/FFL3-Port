@@ -88,9 +88,10 @@ void Shop::tick(const ShopInput& in) {
         const uint8_t it = items[size_t(cursor_)];
         const int p = price(rom_, it);
         if (state_ == State::Buy) {
-            if (gold() < p) { say("Not enough GP.", State::Buy); return; }
-            if (inventoryAdd(ram_, it) < 0) { say("You can't carry", State::Buy); message_ += "\nany more."; return; }
+            if (gold() < p) { sfx(0x3b); say("Not enough GP.", State::Buy); return; }
+            if (inventoryAdd(ram_, it) < 0) { sfx(0x3b); say("You can't carry", State::Buy); message_ += "\nany more."; return; }
             setGold(gold() - p);
+            sfx(0x35);
             say("Thank you!", State::Buy);
         } else {
             for (int i = 0; i < 24; i++) {
@@ -113,7 +114,7 @@ void Shop::tick(const ShopInput& in) {
         if (!in.a) return;
         if (cursor_ == 1) { state_ = State::Done; return; }
         const int c = innCost();
-        if (gold() < c) { say("Not enough GP.", State::Done); return; }
+        if (gold() < c) { sfx(0x3b); say("Not enough GP.", State::Done); return; }
         setGold(gold() - c);
         for (CharRecord& r : party_) {
             if (r.raw[3] == 0xff || (r.raw[1] & 0x40)) continue;

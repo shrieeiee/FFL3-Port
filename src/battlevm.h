@@ -25,7 +25,7 @@ public:
 
     uint8_t rd(uint16_t a) const;
     uint16_t rd16(uint16_t a) const { return uint16_t(rd(a) | rd(uint16_t(a + 1)) << 8); }
-    void wr(uint16_t a, uint8_t v) { if (a >= 0x8000) { mem[a] = v; if (written) written[a] = 1; } }
+    void wr(uint16_t a, uint8_t v) { if (a == 0xffbc && onSfx) onSfx(v); if (a >= 0x8000) { mem[a] = v; if (written) written[a] = 1; } }
     // Debug: when set, reads of RAM not yet written since start() are counted in uninit[].
     uint8_t* written = nullptr;
     uint32_t* uninit = nullptr;
@@ -43,6 +43,8 @@ public:
     std::function<uint8_t(uint8_t n)> random;
     // Called before each statement (tests compare the address trail with the real game).
     std::function<void(uint16_t de)> onStep;
+    // the bytecode requests sound effects by writing hFFBC (the sound driver's SFX slot)
+    std::function<void(uint8_t id)> onSfx;
 
 private:
     void operand();                           // 0C:43C0 -> wCC08

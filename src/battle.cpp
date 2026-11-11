@@ -67,6 +67,7 @@ Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, c
     setup(hffca, ctx);
     vm_.native = [this](uint16_t a) { return native(a); };
     vm_.random = [this](uint8_t n) { return rnd(n); };
+    vm_.onSfx = [this](uint8_t id) { if (id && playSfx) playSfx(id); };
     // wFF93 moves on once a frame on the GB, and the VM is slow enough that long loops (an
     // enemy re-rolling its action) span frames. Approximate: one frame per 150 statements.
     vm_.onStep = [this](uint16_t) { if (++stepCount_ % 150 == 0) vm_.mem[0xff93]++; };

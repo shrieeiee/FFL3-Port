@@ -21,11 +21,13 @@ public:
     int cursorCol() const { return 1; }
     static int price(const Rom& rom, uint8_t item);
     int gold() const;
+    std::function<void(int id)> playSfx;    // $35 bought (01:703C), $3B error (00:1E83)
 
 private:
     enum class State { Menu, Buy, Sell, Inn, Message, Done };
     void say(const char* s, State after);
     void setGold(int g);
+    void sfx(int id) { if (playSfx) playSfx(id); }
     int innCost() const;
     const Rom& rom_;
     BattleRam& ram_;

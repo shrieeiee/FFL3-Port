@@ -292,7 +292,7 @@ void Field::runEventCommand(int cmd, int param) {
         return;
     case 0x18: if (giveItem) giveItem(rom_.b(3, uint16_t(0x762a + param - 1))); return;  // 1a02
     case 0x1c: music = uint8_t(param); return;                          // 1a28
-    case 0x1d: lastSfx = uint8_t(param); return;                        // 1a2e
+    case 0x1d: lastSfx = uint8_t(param); if (playSfx) playSfx(param); return;                        // 1a2e
     case 0x25: {                                                       // 1a95: Talon lift
         // Carries the leader one more block the way they face (every other use also shakes).
         const Dir d = p.facing;

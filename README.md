@@ -67,7 +67,18 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Battles: a beaten party fights again in random-battle areas; story fights you lose carry
   on at 1 HP; targets blink when hit; MP costs in the Magic list
 
-Not yet: music and sound, event $10 and most $12 effects, the shop / menu screens' exact
+**Milestone 8 – music and sound** ✅
+- The bank-0F sound driver translated to C++ (`src/sound.cpp`): all 20 songs and 65 sound
+  effects, vibrato / envelope lists, SFX borrowing pulse 1 and noise. Checked against the real
+  game: 30,818 driver frames replayed with identical APU register writes and RAM state
+  (`tests/sndreplay.cpp`, logs from `tools/sndtrace.c`).
+- A Game Boy APU synth (2 pulse with sweep, wave, noise, NR50/51 mixing, output high-pass)
+  on SDL audio, one driver tick per GB frame.
+- Hooked up: map music, event $1C/$1D, battle music + the encounter sound, the battle
+  bytecode's own sound effects (it writes hFFBC), chest / shop jingles and error buzz.
+- `--mute` turns sound off; `--wav music|sfx HEXID SECONDS` renders `ffl3.wav`.
+
+Not yet: event $10 and most $12 effects, the shop / menu screens' exact
 original layouts (the port's own for now), using items from the field menu, the battle
 "Auto set" mode, battle animations, NPC wandering, the opening sequence.
 

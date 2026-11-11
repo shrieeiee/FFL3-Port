@@ -79,6 +79,7 @@ public:
                                                               // formation | $80 = fixed counts
     std::function<void(int shop)> openShop;                   // event $17 (01:6FD4)
     std::function<void(int item)> giveItem;                   // event $18
+    std::function<void(int id)> playSfx;                       // event $1D / step sounds
     uint8_t music = 0, lastSfx = 0;                           // hCurrentMusic / hSFX
     bool noClip = false;
     bool encounters = true;                                   // random battles on (debug toggle)

@@ -24,7 +24,7 @@ if(NOT SDL2_FOUND)
     endif()
 endif()
 
-add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp)
+add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp)
 target_include_directories(ffl3core PUBLIC src)
 
 add_executable(ffl3 WIN32 src/main.cpp)
@@ -46,3 +46,6 @@ endif()
 
 add_executable(vmreplay tests/vmreplay.cpp)
 target_link_libraries(vmreplay PRIVATE ffl3core)
+
+add_executable(sndreplay tests/sndreplay.cpp)
+target_link_libraries(sndreplay PRIVATE ffl3core)
