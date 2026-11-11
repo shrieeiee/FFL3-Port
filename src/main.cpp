@@ -111,6 +111,7 @@ int main(int argc, char** argv) {
     bool wide = false, debug = false, showSlots = false, mute = false;
     std::string wavKind;
     int partyHp = -1;
+    bool wanderOpt = false;
     int wavId = 0;
     double wavSecs = 0;
     for (int i = 1; i < argc; i++) {
@@ -134,6 +135,7 @@ int main(int argc, char** argv) {
         else if (a == "--wide") wide = true;
         else if (a == "--debug") debug = true;
         else if (a == "--mute") mute = true;
+        else if (a == "--wander") wanderOpt = true;
         else if (a == "--wav" && i + 3 < argc) {      // --wav music|sfx ID SECONDS (writes ffl3.wav)
             wavKind = argv[++i]; wavId = int(std::strtol(argv[++i], nullptr, 16)); wavSecs = std::atof(argv[++i]);
         }
@@ -493,6 +495,7 @@ int main(int argc, char** argv) {
     // ---- headless: tests / tooling ----------------------------------------------------
     if (!dumpTiles.empty() || !shot.empty() || !walk.empty() || !savePath.empty()) {
         if (partyHp >= 0) for (auto& r : party) r.setHp(partyHp);
+        field.wander = wanderOpt;
         if (!dumpTiles.empty()) {
             FILE* f = std::fopen(dumpTiles.c_str(), "wb");
             if (!f) return 1;
@@ -554,7 +557,8 @@ int main(int argc, char** argv) {
             std::printf("slots:");
             for (int i = 0; i < Field::kSlots; i++) {
                 const Actor& a = field.actors()[size_t(i)];
-                if (a.used) std::printf(" %d:%02X%s%s", i, a.savedId, a.id ? "" : "(hidden)", a.proxy ? "(proxy)" : "");
+                if (a.used && wanderOpt) std::printf(" %d:%02X@%d,%d", i, a.savedId, a.row, a.col);
+                else if (a.used) std::printf(" %d:%02X%s%s", i, a.savedId, a.id ? "" : "(hidden)", a.proxy ? "(proxy)" : "");
             }
             std::printf("\n");
         }
@@ -569,6 +573,7 @@ int main(int argc, char** argv) {
 
     // ---- interactive ------------------------------------------------------------------
     if (SDL_Init(SDL_INIT_VIDEO) != 0) { std::fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    field.wander = true;
     // Audio: the sound driver + APU run in the SDL audio callback, one driver frame per GB frame.
     static std::unique_ptr<SoundSystem> sound;
     SDL_AudioDeviceID adev = 0;
@@ -671,7 +676,9 @@ int main(int argc, char** argv) {
                 battle->tick(in);
                 if (battle->finished()) finishBattle();
             } else if (text.active()) {
+                field.wander = false;                // NPCs stand still while someone talks
                 field.tick(-1);                      // scripted actor moves animate under text
+                field.wander = true;
                 text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
             } else {
                 if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);

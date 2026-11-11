@@ -24,10 +24,12 @@ struct Actor {
     int moveFrames = 0;                // >0 while stepping (counts down)
     int dr = 0, dc = 0;                // step direction in blocks
     int animTick = 0;
+    int speed = 2;                     // px per frame (wC310; wandering NPCs walk at 1)
+    bool wandering = false;            // the current step is a random walk (doesn't block scripts)
     uint8_t spriteTile = 0;            // OBJ tile base (wC280)
     static constexpr int kStepFrames = 8;   // 16 px at 2 px/frame
-    int subY() const { return -dr * 2 * moveFrames; }
-    int subX() const { return -dc * 2 * moveFrames; }
+    int subY() const { return -dr * speed * moveFrames; }
+    int subX() const { return -dc * speed * moveFrames; }
     bool proxy = false;                // companion slot (00:0730): talkable, never drawn
     bool visible() const { return used && id != 0; }
     bool drawn() const { return visible() && !proxy; }
@@ -80,6 +82,7 @@ public:
     std::function<void(int shop)> openShop;                   // event $17 (01:6FD4)
     std::function<void(int item)> giveItem;                   // event $18
     std::function<void(int id)> playSfx;
+    bool wander = false;               // NPC random walks (01:4F66); off for headless tests
     std::function<void(int slot, int character)> joinParty;    // event $10 1x/2x (0B:6DE4)
     std::function<void(int slot)> leaveParty;                  // event $10 0x (0B:6E33)
     std::function<void(uint16_t addr, uint8_t v)> pokeRam;
@@ -98,7 +101,9 @@ private:
     void onStepDone();
     bool warpTo(int map, uint8_t b2, uint8_t b3);   // 00:1468 - map, row|facing, col|facing
     bool warpByExitTable();
-    void startMove(int slot, Dir d, bool turn);
+    void startMove(int slot, Dir d, bool turn, int speed = 2);
+    bool objectPassable(int row, int col) const;
+    void wanderStep();
     void actorCommand(int param);                   // event $26 (01:66e9)
 
     const Rom& rom_;

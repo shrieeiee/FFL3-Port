@@ -126,18 +126,51 @@ bool Field::occupied(int row, int col, int selfSlot) const {
 bool Field::busy() const {
     if (!walks_.empty()) return true;
     for (int i = 1; i < kSlots; i++)
-        if (actors_[size_t(i)].moveFrames) return true;
+        if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
 }
 
-void Field::startMove(int slot, Dir d, bool turn) {
+void Field::startMove(int slot, Dir d, bool turn, int speed) {
     Actor& a = actors_[size_t(slot)];
     if (turn) a.facing = d;
     a.dr = kDr[int(d)];
     a.dc = kDc[int(d)];
     a.row = wrap(a.row + a.dr, rows());
     a.col = wrap(a.col + a.dc, cols());
-    a.moveFrames = Actor::kStepFrames;
+    a.speed = speed;
+    a.wandering = false;
+    a.moveFrames = 16 / speed;
+}
+
+// 00:0FFD: can an object step onto this block? Flags wC2E0 = $47, $45 for ordinary
+// townsfolk (00:069C clears bit 1; RAM shows $45 on them).
+bool Field::objectPassable(int row, int col) const {
+    const uint8_t a = attrAt(row, col);
+    if (a == 0xeb) return true;
+    if ((a & 0xc0) == 0xc0) return false;
+    if ((a & 0xc0) == 0x80) return true;
+    return (a & 0x45) == 0;
+}
+
+// 01:4F66 / 5060: move types 0-3 and $1B-$1E take a random step about once every 64 frames
+// (rnd & $FC == 0), at 1 px per frame; the facing changes even when the way is blocked.
+void Field::wanderStep() {
+    for (int i = 2; i < kSlots; i++) {
+        Actor& a = actors_[size_t(i)];
+        if (!a.visible() || a.proxy || a.moveFrames) continue;
+        if (i + 1 < kSlots && actors_[size_t(i + 1)].proxy) continue;   // shop counter pair
+        const int t = a.obj.move;
+        if (!(t <= 3 || (t >= 0x1b && t <= 0x1e))) continue;
+        const uint8_t r = random8();
+        if (r & 0xfc) continue;
+        static const Dir dirs[4] = {Dir::Down, Dir::Up, Dir::Left, Dir::Right};   // 50DC 5121 51AC 5166
+        const Dir d = dirs[r & 3];
+        a.facing = d;
+        const int nr = a.row + kDr[int(d)], nc = a.col + kDc[int(d)];
+        if (!objectPassable(nr, nc) || occupied(nr, nc, i)) continue;
+        startMove(i, d, true, 1);
+        a.wandering = true;
+    }
 }
 
 void Field::tick(int dir) {
@@ -153,6 +186,7 @@ void Field::tick(int dir) {
     }
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames) actors_[size_t(i)].moveFrames--;
+    if (wander && walks_.empty()) wanderStep();
 
     Actor& p = actors_[0];
     if (p.moveFrames > 0) {

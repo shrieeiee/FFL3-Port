@@ -87,12 +87,14 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   saved return spot (01:6A74 table, save / restore), facing flags, object reload; $12 $10.
 - Text codes $0C (timed pause), $11 / $27 (cosmetic). Fixed $27's length (it takes no
   argument): it was knocking 18 NPC scripts off the rails (the Dwelg fight text among them).
+- Townsfolk wander (01:4F66 / 5060): move types 0-3 and $1B-$1E take a random step about
+  once a second at half walking speed, blocked by walls, event blocks and people.
 - Map event blocks: damage floors ($20), status-cure ($21) and healing ($22) spots, the
   slide-and-exit $08/$09.
 
 Not yet: event $10 A/C/F/5/8 and most $12 effects, the shop / menu screens' exact
 original layouts (the port's own for now), the battle
-"Auto set" mode, battle animations, NPC wandering, the opening sequence.
+"Auto set" mode, battle animations, the opening sequence.
 
 ## Building
 
