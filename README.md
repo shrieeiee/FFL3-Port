@@ -58,8 +58,18 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   (the port goes back to the start), battle animations (short pauses instead), MP cost
   shown in the Magic list.
 
-Not yet: event $10 and most $12 effects (logged in the title bar), chests, shops, menus,
-music, NPC wandering, saving, the opening sequence itself.
+**Milestone 7 – the rest of the game loop** ✅
+- Chests (item from 03:762A, "Received X." / "Empty", opened chests stay open)
+- Shops and inns (wares 01:7804, prices 01:7E4F, sell for half, inn = missing HP + MP)
+- Field menu: Equip (bag <-> equipment slots, stats recomputed by the game's own routines),
+  Items, Status, Save
+- Save / load (F5 / F9, `--save` / `--load`)
+- Battles: a beaten party fights again in random-battle areas; story fights you lose carry
+  on at 1 HP; targets blink when hit; MP costs in the Magic list
+
+Not yet: music and sound, event $10 and most $12 effects, the shop / menu screens' exact
+original layouts (the port's own for now), using items from the field menu, the battle
+"Auto set" mode, battle animations, NPC wandering, the opening sequence.
 
 ## Building
 
@@ -93,6 +103,8 @@ ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
 | Tab | GB 160×144 ↔ widescreen 256×144 |
 | F1 | collision overlay (green walk, red solid, blue event) |
 | F2 | no-clip |
+| M / Shift | field menu (Equip, Items, Status, Save) |
+| F5 / F9 | save / load `ffl3.sav` |
 | F3 | random battles on / off |
 | F4 | start a random battle for the current map |
 | PgUp / PgDn, `[` / `]` | previous / next map |

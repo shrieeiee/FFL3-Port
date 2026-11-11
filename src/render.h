@@ -5,6 +5,7 @@
 #include "text.h"
 #include "battle.h"
 #include "shop.h"
+#include "menu.h"
 
 namespace ffl3 {
 
@@ -46,6 +47,7 @@ struct BattleGfx {
 // then OBJs. Font / frame tiles come from the shared set at $8800 (tc.bg[$80-$FF]).
 // Shop / inn window over the field.
 void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Frame& out);
+void renderMenu(const FieldMenu& menu, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out);
 

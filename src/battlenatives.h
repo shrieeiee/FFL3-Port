@@ -13,6 +13,10 @@ bool runLogicNative(BattleVM& vm, const Rom& rom, uint16_t addr);
 // Reads wC500 (party), wCC36-38 (counts), wCC59-5B (monster ids); wCD37 must be 1.
 void battleSetupCombatants(BattleVM& vm, const Rom& rom);
 
+// 0B:7349 + 0B:728B on party record `member` (wCD37 = 0): recompute the equipment / status
+// bits after the equipment changed.
+void recomputeMember(BattleVM& vm, const Rom& rom, int member);
+
 // Small bank-0 helpers the natives use.
 void gbCopy(BattleVM& vm, uint16_t& hl, uint16_t& de, int n);     // [hl+] -> [de+], n bytes
 void gbFill(BattleVM& vm, uint16_t hl, uint8_t a, int n);

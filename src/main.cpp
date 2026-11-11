@@ -4,7 +4,7 @@
 //                 [--wide] [--debug] [--dump-blocks out.bin] [--scale N]
 //
 // Keys: arrows/WASD walk, Z/Space/Enter = A, X/Backspace = B, F1 collision overlay, F2 no-clip,
-//       F3 random battles on/off, F4 start a random battle here, F5 save / F9 load (ffl3.sav),
+//       M / Shift field menu (Equip, Items, Status, Save), F3 random battles on/off, F4 start a random battle here, F5 save / F9 load (ffl3.sav),
 //       Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "render.h"
@@ -251,6 +251,8 @@ int main(int argc, char** argv) {
     std::unique_ptr<Shop> shop;
     auto openShop = [&](int id) { shop = std::make_unique<Shop>(rom, battleRam, party, id); };
     field.openShop = openShop;
+    std::unique_ptr<FieldMenu> menu;
+    auto openMenu = [&] { menu = std::make_unique<FieldMenu>(rom, battleRam, party, [&] { return saveGame("ffl3.sav"); }); };
     auto chest = [&](int slot, const MapObject& o) {           // 00:09D7
         const int k = o.id - 1;
         if (o.id == 0 || k >= 0x80 || flags.chest.test(size_t(k))) { text.open(1, 0x611d); return; }   // "Empty"
@@ -418,6 +420,14 @@ int main(int argc, char** argv) {
         }
         // Script: U/D/L/R step, A = press A (talk / advance text) then 40 frames, W = 60 frames.
         for (char c : walk) {
+            if (c == 'M' && !menu) { openMenu(); continue; }
+            if (menu) {                                 // A / B / U / D drive the menu
+                MenuInput in;
+                in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
+                menu->tick(in);
+                if (menu->done()) menu.reset();
+                continue;
+            }
             if (shop) {                                 // A / B / U / D drive an open shop
                 ShopInput in;
                 in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
@@ -450,6 +460,7 @@ int main(int argc, char** argv) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
             renderTextBox(text, tiles, opts, frame);
             if (shop) renderShop(*shop, tiles, opts, frame);
+            if (menu) renderMenu(*menu, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
             if (!saveBmp(argb, frame.w, frame.h, shot.c_str())) return 1;
         }
@@ -500,6 +511,9 @@ int main(int argc, char** argv) {
             }
             case SDLK_F1: debug = !debug; break;
             case SDLK_F2: field.noClip = !field.noClip; break;
+            case SDLK_m: case SDLK_RSHIFT: case SDLK_LSHIFT:
+                if (!battle && !shop && !menu && !text.active()) openMenu();
+                break;
             case SDLK_F5: field.setLastEvent(saveGame("ffl3.sav") ? "saved to ffl3.sav" : "save failed"); break;
             case SDLK_F9: field.setLastEvent(loadGame("ffl3.sav") ? "loaded ffl3.sav" : "no save (ffl3.sav)"); break;
             case SDLK_F3: field.encounters = !field.encounters;
@@ -534,7 +548,13 @@ int main(int argc, char** argv) {
             const bool aPressed = aHeld && !aPrev;
             const bool bHeld = k[SDL_SCANCODE_X] || k[SDL_SCANCODE_BACKSPACE];
             const bool left = d == int(Dir::Left), right = d == int(Dir::Right);
-            if (shop) {
+            if (menu) {
+                MenuInput in;
+                in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
+                in.left = left && !leftPrev; in.right = right && !rightPrev;
+                menu->tick(in);
+                if (menu->done()) menu.reset();
+            } else if (shop) {
                 ShopInput in;
                 in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
                 shop->tick(in);
@@ -563,6 +583,7 @@ int main(int argc, char** argv) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
             renderTextBox(text, tiles, opts, frame);
             if (shop) renderShop(*shop, tiles, opts, frame);
+            if (menu) renderMenu(*menu, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         }
         if (!tex || texW != frame.w) {

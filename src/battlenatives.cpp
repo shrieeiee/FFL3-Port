@@ -397,6 +397,13 @@ static void spellBits(BattleVM& vm, const Rom& rom) {
     vm.wr(0xcd36, 0x0c);
 }
 
+void recomputeMember(BattleVM& vm, const Rom& rom, int member) {
+    vm.wr(0xcd37, 0);
+    vm.wr(0xcd36, uint8_t(member));
+    rec7349(vm, rom);
+    rec728b(vm, rom);
+}
+
 void battleSetupCombatants(BattleVM& vm, const Rom& rom) {
     gbFill(vm, 0xd000, 0xff, 0x680);
     for (int i = 0; i < 5; i++) {

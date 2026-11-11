@@ -153,6 +153,23 @@ void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Fram
     }
 }
 
+template <class T>
+static void renderOverlay(const T& w, const TileCache& tc, const RenderOpts& o, Frame& out) {
+    const int x0 = (out.w - 160) / 2;
+    const auto s = w.screen();
+    for (int r = 0; r < 18; r++)
+        for (int c = 0; c < 20; c++)
+            if (s[size_t(r * 20 + c)]) drawBgTile(tc, o.bgp, out, x0 + c * 8, r * 8, s[size_t(r * 20 + c)]);
+    const int cr = w.cursorRow();
+    if (cr < 0) return;
+    const auto& t = tc.obj[0x7e];
+    const int cx = x0 + 8 * w.cursorCol() - 8;
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            if (t[size_t(y * 8 + x)]) out.px[size_t(cr * 8 + y) * size_t(out.w) + size_t(cx + x)] = uint8_t((o.obp >> (t[size_t(y * 8 + x)] * 2)) & 3);
+}
+void renderMenu(const FieldMenu& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
+
 // ---- battle --------------------------------------------------------------------------------
 
 void BattleGfx::build(const Rom& rom, const Battle& b) {
