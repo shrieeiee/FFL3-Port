@@ -294,6 +294,25 @@ int main(int argc, char** argv) {
         shop->playSfx = [&](int sid) { sndSfx(sid); };
     };
     field.playSfx = [&](int id) { sndSfx(id); };
+    auto poke = [&](uint16_t a, uint8_t v) {
+        battleRam[a] = v;
+        if (a >= 0xc500 && a < 0xc6e0 && size_t(a - 0xc500) / 0x60 < party.size())   // party records
+            party[size_t(a - 0xc500) / 0x60].raw[size_t(a - 0xc500) % 0x60] = v;
+    };
+    field.pokeRam = poke;
+    // 0B:6DE4: character `who` (07:7A81 + 0B:7573[who] * $60) into party slot `slot`;
+    // slot 3 with who 6 = the guest (record 4) stays for good.
+    field.joinParty = [&](int slot, int who) {
+        if (slot < 0 || slot > 4) return;
+        if (slot == 3 && who == 6) {
+            party[3] = party[4];
+            party[3].raw[3] = rom.b(7, 0x7ba4);
+        } else {
+            party[size_t(slot)] = loadCharacter(rom, rom.b(0x0b, uint16_t(0x7573 + who)));
+        }
+        for (int i = 0; i < 4; i++) battleRam[size_t(0xce00 + slot * 4 + i)] = 0;
+    };
+    field.leaveParty = [&](int slot) { party[size_t(slot)].raw[3] = 0xff; };   // 0B:6E33: +3 = $FF
     field.openShop = openShop;
     std::unique_ptr<FieldMenu> menu;
     auto openMenu = [&] {

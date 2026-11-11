@@ -147,6 +147,9 @@ void TextBox::step() {
         case 0x07: case 0x14: clear(); break;
         case 0x1c: break;                // 27c5: wCD34 bit 1 = trim the blanks of the next name (names are trimmed anyway)
         case 0x05: case 0x4c: break;
+        case 0x0c: delay_ = 2 * a[0]; return;   // 2766: pause 2 x n frames (A cuts it short)
+        case 0x11: break;                        // 2779: arrow sprite on/off (cosmetic)
+        case 0x27: break;                        // 2B02: wCDC1 = 1
         case 0x1f: {                     // 2955 (index via 20de): party member or story character
             int m = a[0];
             if (m == 0x80 || m == 0xff) m = 0;                 // wCD4C / wCD36 (current actor)
@@ -262,7 +265,7 @@ void TextBox::tick(bool aPressed, bool aHeld, bool upPressed, bool downPressed) 
         if (isBusy && isBusy()) return;
         if (delay_ > 0 && !aHeld) { delay_--; return; }
         step();
-        delay_ = 1;                      // ~2 frames per character, faster while A is held
+        if (delay_ <= 0) delay_ = 1;     // ~2 frames per character, faster while A is held
         return;
     case State::Idle:
         return;

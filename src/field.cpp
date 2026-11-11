@@ -236,6 +236,7 @@ void Field::actorCommand(int param) {
 
 // Event command table at 00:124A (dispatcher 00:1236).
 void Field::runEventCommand(int cmd, int param) {
+    if (std::getenv("FFL3_EVLOG")) std::fprintf(stderr, "EV %02X %02X map %02X\n", cmd, param, map_);
     char buf[96];
     Actor& p = actors_[0];
     auto pushReturn = [&] {
@@ -269,6 +270,40 @@ void Field::runEventCommand(int cmd, int param) {
             }
         return;
     }
+    case 0x10: {                                                       // 14c0: sub-commands p >> 4
+        const int lo = param & 15;
+        switch (param >> 4) {
+        case 0x0: if (leaveParty) leaveParty(4); return;               // 1518: guest leaves
+        case 0x1: {                                                    // 14F8: guest = 00:151D[p-1]
+            static const uint8_t who[6] = {2, 8, 3, 9, 4, 5};
+            if (lo >= 1 && lo <= 6 && joinParty) joinParty(4, who[lo - 1]);
+            return;
+        }
+        case 0x2: if (lo == 1 && joinParty) joinParty(3, 6); return;   // 1508: 4th member
+        case 0x3: case 0x9: return;                                    // 14EA: nothing
+        case 0x4: {                                                    // 15DE -> 01:6A74
+            if (lo < 1) return;
+            const uint16_t t = uint16_t(0x6aac + (lo - 1) * 3);
+            saved_ = {rom_.b(1, uint16_t(t + 2)), rom_.b(1, t) + 5, rom_.b(1, uint16_t(t + 1)) + 5};
+            return;
+        }
+        case 0x6:                                                      // 15B3: facing -> flags $0C/$0D
+            flags_.event.reset(0x0c); flags_.event.reset(0x0d);
+            if (int(p.facing) & 2) flags_.event.set(0x0c);
+            if (int(p.facing) & 1) flags_.event.set(0x0d);
+            return;
+        case 0x7: enterMap(map_, p.row, p.col, p.facing); return;      // 1524: reload objects
+        case 0xb: if (flags_.test(4)) return; [[fallthrough]];         // 15A1
+        case 0xe:                                                      // 15A7: back to the saved spot
+            if (saved_.map >= 0) enterMap(saved_.map, saved_.row, saved_.col, p.facing);
+            return;
+        case 0xd: saved_ = {map_, p.row, p.col}; return;               // 15E6
+        default:
+            std::snprintf(buf, sizeof buf, "event 10 sub %02X (not implemented)", param);
+            lastEvent_ = buf;
+            return;
+        }
+    }
     case 0x12:                                                         // 16b9: sub-commands
         switch (param) {
         case 0x01: vehicle_ = 0; return;                               // 1745
@@ -276,6 +311,9 @@ void Field::runEventCommand(int cmd, int param) {
         case 0x04: enterMap(map_, p.row, p.col, p.facing); return;     // 174d: redraw map
         case 0x0b: runEventCommand(0x0e, 0x37); return;                // 1711
         case 0x0c: runEventCommand(0x0d, 0x02); return;                // 1728
+        case 0x10:                                                     // 16EB
+            if (pokeRam) { pokeRam(0xc6f3, 0x1b); pokeRam(0xc50d, 0x02); pokeRam(0xc50e, 0xe0); }
+            return;
         default:
             std::snprintf(buf, sizeof buf, "event 12 sub %02X (effect, not implemented)", param);
             lastEvent_ = buf;

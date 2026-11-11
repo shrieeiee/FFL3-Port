@@ -79,7 +79,10 @@ public:
                                                               // formation | $80 = fixed counts
     std::function<void(int shop)> openShop;                   // event $17 (01:6FD4)
     std::function<void(int item)> giveItem;                   // event $18
-    std::function<void(int id)> playSfx;                       // event $1D / step sounds
+    std::function<void(int id)> playSfx;
+    std::function<void(int slot, int character)> joinParty;    // event $10 1x/2x (0B:6DE4)
+    std::function<void(int slot)> leaveParty;                  // event $10 0x (0B:6E33)
+    std::function<void(uint16_t addr, uint8_t v)> pokeRam;     // game RAM writes (party records, wC6xx)                       // event $1D / step sounds
     uint8_t music = 0, lastSfx = 0;                           // hCurrentMusic / hSFX
     bool noClip = false;
     bool encounters = true;                                   // random battles on (debug toggle)
@@ -113,6 +116,7 @@ private:
     uint8_t leaderFlags_ = 0x45;       // wC804 = leader slot flags wC2E0 ($45 on foot, from RAM)
     struct Return { int map, row, col; };
     std::vector<Return> returnStack_;  // wC7A0 / wC7C0
+    Return saved_{-1, 0, 0};           // wC6E9-C6ED: saved position (event $10 4x/Dx/Ex)
     std::string lastEvent_;
     uint32_t rng_ = 0x5a6a3;
 };
