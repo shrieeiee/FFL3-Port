@@ -24,6 +24,7 @@ bool Field::enterMap(int map, int row, int col, Dir facing) {
     objTiles_ = loadObjTiles(rom_, hdr_.unk1e);
     exits_ = loadMapExits(rom_, map);
     walks_.clear();
+    holesFilled_ = 0;                                                  // 00:0282
     if (hdr_.music != 0x1f) music = hdr_.music;
 
     for (Actor& a : actors_) a = Actor{};
@@ -152,6 +153,41 @@ bool Field::objectPassable(int row, int col) const {
     return (a & 0x45) == 0;
 }
 
+// 01:51FE (move type $0B): when the leader walks into the object, it is shoved one block the
+// same way at 1 px per frame, if it fits there (00:0FFD; $EB holes are allowed).
+bool Field::tryPush(int row, int col, Dir d) {
+    row = wrap(row, rows()); col = wrap(col, cols());
+    for (int i = 2; i < kSlots; i++) {
+        Actor& a = actors_[size_t(i)];
+        if (!a.visible() || a.row != row || a.col != col) continue;
+        if (a.obj.move != 0x0b || a.moveFrames) return false;
+        const int nr = row + kDr[int(d)], nc = col + kDc[int(d)];
+        if (!objectPassable(nr, nc) || occupied(nr, nc, i)) return false;
+        startMove(i, d, true, 1);
+        return true;
+    }
+    return false;
+}
+
+// 01:525B -> event $2B (00:1BE4): a boulder dropped into a $EB hole. 0B:1C51 writes the block
+// strip 0B:7CC7 (count/rows nibbles, then blocks) at the boulder; the fourth one on maps
+// $7C / $7D / others sets flag $E4 / $E5 / $E6, and with all three the water stops (0A:7CF1).
+void Field::boulderLanded(int slot) {
+    Actor& a = actors_[size_t(slot)];
+    if (playSfx) playSfx(0x1c);
+    uint16_t t = 0x7cc7;
+    const uint8_t hdr = rom_.b(0x0b, t++);
+    const int w = hdr >> 4, h = hdr & 15;
+    for (int r = 0; r < h; r++)
+        for (int c = 0; c < w; c++)
+            layout_.blocks[size_t(wrap(a.row + r, rows())) * cols() + wrap(a.col + c, cols())] = rom_.b(0x0b, t++);
+    blocksVersion_++;
+    a.obj.move = 0x04;                                      // wC2F0 := 0: done
+    if (++holesFilled_ != 4) return;
+    flags_.event.set(map_ == 0x7c ? 0xe4 : map_ == 0x7d ? 0xe5 : 0xe6);
+    if (flags_.test(0xe4) && flags_.test(0xe5) && flags_.test(0xe6) && openText) openText(0xa, 0x7cf1);
+}
+
 // 01:4F66 / 5060: move types 0-3 and $1B-$1E take a random step about once every 64 frames
 // (rnd & $FC == 0), at 1 px per frame; the facing changes even when the way is blocked.
 void Field::wanderStep() {
@@ -184,8 +220,11 @@ void Field::tick(int dir) {
             else walks_.erase(walks_.begin());
         }
     }
-    for (int i = 1; i < kSlots; i++)
-        if (actors_[size_t(i)].moveFrames) actors_[size_t(i)].moveFrames--;
+    for (int i = 1; i < kSlots; i++) {
+        Actor& a = actors_[size_t(i)];
+        if (a.moveFrames && --a.moveFrames == 0 && a.obj.move == 0x0b && attrAt(a.row, a.col) == 0xeb)
+            boulderLanded(i);
+    }
     if (wander && walks_.empty()) wanderStep();
 
     Actor& p = actors_[0];
@@ -197,7 +236,7 @@ void Field::tick(int dir) {
     const Dir d = Dir(dir);
     p.facing = d;
     const int nr = p.row + kDr[dir], nc = p.col + kDc[dir];
-    if (!noClip && (!passable(nr, nc) || occupied(nr, nc, 0))) return;
+    if (!noClip && (!passable(nr, nc) || (occupied(nr, nc, 0) && !tryPush(nr, nc, d)))) return;
     startMove(0, d, true);
 }
 
@@ -379,6 +418,7 @@ void Field::runEventCommand(int cmd, int param) {
         if (playSfx) playSfx(0x18);
         return;
     case 0x2d: case 0x2e: case 0x30: case 0x31: return;                // 12db: nothing
+    case 0x2a: if (openText) openText(0xa, 0x7a7d); return;            // 1bd7: rst $A0 0A:7A7D
     case 0x22:                                                         // 1a84: rest (fade, heal)
         if (playSfx) playSfx(0x17);
         if (healParty) healParty();

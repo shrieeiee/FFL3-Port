@@ -62,6 +62,7 @@ public:
     int vehicle() const { return vehicle_; }          // wC6E3
     void setVehicle(int v) { vehicle_ = v; }
     uint8_t blockAt(int row, int col) const;
+    int blocksVersion() const { return blocksVersion_; }   // bumped when events rewrite blocks
     uint8_t attrAt(int row, int col) const;
     bool passable(int row, int col) const;
     const std::array<uint8_t, 4>& drawnTiles(uint8_t block) const;
@@ -124,7 +125,11 @@ private:
     uint8_t leaderFlags_ = 0x45;       // wC804 = leader slot flags wC2E0 ($45 on foot, from RAM)
     struct Return { int map, row, col; };
     std::vector<Return> returnStack_;  // wC7A0 / wC7C0
-    Return saved_{-1, 0, 0};           // wC6E9-C6ED: saved position (event $10 4x/Dx/Ex)
+    Return saved_{-1, 0, 0};
+    int blocksVersion_ = 0;
+    int holesFilled_ = 0;              // wCA01: boulders dropped this visit (event $2B)
+    bool tryPush(int row, int col, Dir d);
+    void boulderLanded(int slot);           // wC6E9-C6ED: saved position (event $10 4x/Dx/Ex)
     std::string lastEvent_;
     uint32_t rng_ = 0x5a6a3;
 };

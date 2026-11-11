@@ -357,7 +357,13 @@ int main(int argc, char** argv) {
     int pal = 0;
     std::vector<uint32_t> argb;
     std::vector<uint8_t> tint;
-    auto refreshTiles = [&] { if (tiles.map != field.mapId()) tiles.build(rom, field); };
+    int tilesVersion = -1;
+    auto refreshTiles = [&] {
+        if (tiles.map != field.mapId() || tilesVersion != field.blocksVersion()) {
+            tiles.build(rom, field);
+            tilesVersion = field.blocksVersion();
+        }
+    };
 
     // --ram ADDR:VAL,...: poke battle RAM (inventory etc.) and party records, for tests
     for (size_t p = 0; p < ramPokes.size();) {
