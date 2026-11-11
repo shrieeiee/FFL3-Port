@@ -17,6 +17,12 @@ void battleSetupCombatants(BattleVM& vm, const Rom& rom);
 // bits after the equipment changed.
 void recomputeMember(BattleVM& vm, const Rom& rom, int member);
 
+// 09:521A: use item / spell wCE26 (wCE25 = 0) outside battle on member wCD36 ($80 = the whole
+// party). Party records at wC500, wCD37 = 0, wCE1C = the caster (spells cost wCE29 MP).
+// rand8 stands in for hFF93; sfx gets the driver's SFX ids. Returns false if it can't be used.
+bool fieldUse(BattleVM& vm, const Rom& rom, const std::function<uint8_t()>& rand8,
+              const std::function<void(int)>& sfx);
+
 // Small bank-0 helpers the natives use.
 void gbCopy(BattleVM& vm, uint16_t& hl, uint16_t& de, int n);     // [hl+] -> [de+], n bytes
 void gbFill(BattleVM& vm, uint16_t hl, uint8_t a, int n);

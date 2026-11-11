@@ -22,7 +22,7 @@ void box(Screen& s, int c0, int r0, int w, int h) {
             s[size_t(r * 20 + c)] = t;
         }
 }
-const char* kTop[4] = {"Equip", "Items", "Status", "Save"};
+const char* kTop[5] = {"Equip", "Items", "Magic", "Status", "Save"};
 }
 
 FieldMenu::FieldMenu(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, std::function<bool()> save)
@@ -52,33 +52,104 @@ void FieldMenu::equip(int slot, int bagIndex) {
         return;
     }
     // Recompute with the game's own routines on a RAM image holding the party records.
-    static BattleVM* vm = nullptr;
-    static BattleVM storage(rom_);
-    vm = &storage;
-    vm->mem = ram_;
+    recomputeMember(vm(), rom_, member_);
+    syncBack();
+}
+
+static BattleVM& vmStorage(const Rom& rom) { static BattleVM s(rom); return s; }
+
+BattleVM& FieldMenu::vm() {
+    BattleVM& storage = vmStorage(rom_);
+    storage.mem = ram_;
     for (size_t i = 0; i < party_.size() && i < 5; i++)
-        std::copy(party_[i].raw.begin(), party_[i].raw.end(), vm->mem.begin() + 0xc500 + long(i) * 0x60);
-    recomputeMember(*vm, rom_, member_);
-    std::copy(vm->mem.begin() + 0xc500 + member_ * 0x60, vm->mem.begin() + 0xc560 + member_ * 0x60, r.raw.begin());
+        std::copy(party_[i].raw.begin(), party_[i].raw.end(), storage.mem.begin() + 0xc500 + long(i) * 0x60);
+    return storage;
+}
+
+void FieldMenu::syncBack() {
+    BattleVM& v = vmStorage(rom_);
+    for (size_t i = 0; i < party_.size() && i < 5; i++)
+        std::copy(v.mem.begin() + 0xc500 + long(i) * 0x60, v.mem.begin() + 0xc560 + long(i) * 0x60, party_[i].raw.begin());
+}
+
+// Spells a member knows: bits at record +$51-56 (09:51EA), with their MP cost (09:5D87).
+std::vector<FieldMenu::Spell> FieldMenu::spells(int member) {
+    std::vector<Spell> v;
+    const CharRecord& r = party_[size_t(member)];
+    BattleVM& m = vm();
+    for (int k = 0; k < 6; k++)
+        for (int bit = 0; bit < 8; bit++)
+            if (r.raw[size_t(0x51 + k)] & (0x80 >> bit)) {
+                const uint8_t id = uint8_t((k ^ 1) * 8 + 7 - bit);
+                m.mem[0xce26] = id; m.mem[0xce25] = 0; m.mem[0xce27] = 0; m.mem[0xcd37] = 0;
+                m.mem[0xcd36] = uint8_t(member);
+                runLogicNative(m, rom_, 0x6b64);
+                v.push_back({id, m.mem[0xce29]});
+            }
+    return v;
+}
+
+void FieldMenu::choose(uint8_t id, bool spell) {
+    BattleVM& m = vm();
+    m.mem[0xce26] = id; m.mem[0xce25] = 0; m.mem[0xce27] = spell ? 0 : 1; m.mem[0xcd37] = 0;
+    m.mem[0xcd36] = uint8_t(member_);
+    runLogicNative(m, rom_, 0x6b64);                         // 09:5D87: use kind wCE28
+    const uint8_t kind = m.mem[0xce28];
+    useId_ = id; useSpell_ = spell; back_ = spell ? State::Spells : State::Items;
+    if (spell && party_[size_t(member_)].mp() < m.mem[0xce29]) { sfx(0x3b); say("Not enough MP.", back_); return; }
+    if (!kind || (kind & 0x80) || !(kind & 0x18)) { sfx(0x3b); say("Can't use that here.", back_); return; }
+    if (kind & 0x10) { use(0x80); return; }
+    target_ = 0;
+    state_ = State::Target;
+}
+
+void FieldMenu::use(int target) {
+    BattleVM& m = vm();
+    m.mem[0xce26] = useId_; m.mem[0xce25] = 0; m.mem[0xce27] = 0; m.mem[0xcd37] = 0;
+    m.mem[0xcd36] = uint8_t(target);
+    m.mem[0xce1c] = uint8_t(member_);
+    auto rand8 = [this]() { rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5; return uint8_t(rng_ >> 8); };
+    const bool ok = fieldUse(m, rom_, rand8, [this](int id) { sfx(id); });
+    syncBack();
+    if (!ok) { say("Nothing happened.", back_); return; }
+    if (!useSpell_ && useId_ >= 0xc0) {                       // used up
+        for (int i = 0; i < 24; i++) {
+            const size_t h = size_t(0xc6ff + i * 2);
+            if (ram_[h] != useId_) continue;
+            if (--ram_[h + 1] == 0) { ram_[h] = 0xff; ram_[h + 1] = 0xff; }
+            break;
+        }
+    }
+    char buf[32];
+    if (target < 5) {
+        const CharRecord& r = party_[size_t(target)];
+        std::snprintf(buf, sizeof buf, "HP %d/%d MP %d/%d", r.hp(), r.maxHp(), r.mp(), r.maxMp());
+    } else {
+        std::snprintf(buf, sizeof buf, "Done.");
+    }
+    say(buf, back_);
 }
 
 void FieldMenu::tick(const MenuInput& in) {
     const int members = int(std::min<size_t>(party_.size(), 4));
     switch (state_) {
     case State::Top:
-        if (in.up) top_ = (top_ + 3) % 4;
-        if (in.down) top_ = (top_ + 1) % 4;
+        if (in.up) top_ = (top_ + 4) % 5;
+        if (in.down) top_ = (top_ + 1) % 5;
         if (in.b) { state_ = State::Done; return; }
         if (!in.a) return;
         if (top_ == 1) { state_ = State::Items; first_ = 0; bag_ = 0; }
-        else if (top_ == 3) { message_ = save_ && save_() ? "Saved." : "Couldn't save."; next_ = State::Top; state_ = State::Message; }
+        else if (top_ == 4) { message_ = save_ && save_() ? "Saved." : "Couldn't save."; next_ = State::Top; state_ = State::Message; }
         else { state_ = State::Member; }
         return;
     case State::Member:
         if (in.up) member_ = (member_ + members - 1) % members;
         if (in.down) member_ = (member_ + 1) % members;
         if (in.b) { state_ = State::Top; return; }
-        if (in.a) { state_ = top_ == 0 ? State::Slots : State::Status; slot_ = 0; }
+        if (in.a) {
+            state_ = top_ == 0 ? State::Slots : top_ == 2 ? State::Spells : State::Status;
+            slot_ = 0; bag_ = 0; first_ = 0;
+        }
         return;
     case State::Slots:
         if (in.up) slot_ = (slot_ + 7) % 8;
@@ -97,13 +168,32 @@ void FieldMenu::tick(const MenuInput& in) {
         return;
     }
     case State::Items: {
-        const int n = std::max<int>(1, int(bagIndices().size()));
+        const auto bag = bagIndices();
+        const int n = std::max<int>(1, int(bag.size()));
+        if (bag_ >= n) bag_ = n - 1;
         if (in.up) bag_ = (bag_ + n - 1) % n;
         if (in.down) bag_ = (bag_ + 1) % n;
         first_ = std::max(0, std::min(bag_ - 5, n - 6));
-        if (in.a || in.b) state_ = State::Top;
+        if (in.b) { state_ = State::Top; return; }
+        if (in.a && !bag.empty()) { member_ = 0; choose(ram_[size_t(0xc6ff + bag[size_t(bag_)] * 2)], false); }
         return;
     }
+    case State::Spells: {
+        const auto list = spells(member_);
+        const int n = std::max<int>(1, int(list.size()));
+        if (in.up) bag_ = (bag_ + n - 1) % n;
+        if (in.down) bag_ = (bag_ + 1) % n;
+        first_ = std::max(0, std::min(bag_ - 5, n - 6));
+        if (in.b) { state_ = State::Member; return; }
+        if (in.a && !list.empty()) choose(list[size_t(bag_)].id, true);
+        return;
+    }
+    case State::Target:
+        if (in.up) target_ = (target_ + members - 1) % members;
+        if (in.down) target_ = (target_ + 1) % members;
+        if (in.b) { state_ = back_; return; }
+        if (in.a) use(target_);
+        return;
     case State::Status:
         if (in.up) member_ = (member_ + members - 1) % members;
         if (in.down) member_ = (member_ + 1) % members;
@@ -122,7 +212,8 @@ int FieldMenu::cursorRow() const {
     case State::Top: return 2 + top_ * 2;
     case State::Member: return 2 + member_ * 2;
     case State::Slots: return 2 + slot_ * 2;
-    case State::Bag: case State::Items: return 2 + (bag_ - first_) * 2;
+    case State::Bag: case State::Items: case State::Spells: return 2 + (bag_ - first_) * 2;
+    case State::Target: return 2 + target_ * 2;
     default: return -1;
     }
 }
@@ -157,10 +248,10 @@ std::array<uint8_t, 360> FieldMenu::screen() const {
     };
     switch (state_) {
     case State::Top: case State::Member: {
-        box(s, 0, 0, 8, 10);
-        for (int i = 0; i < 4; i++) putStr(s, 2, 2 + i * 2, kTop[i]);
+        box(s, 0, 0, 8, 12);
+        for (int i = 0; i < 5; i++) putStr(s, 2, 2 + i * 2, kTop[i]);
         if (state_ == State::Member) {
-            box(s, 8, 0, 12, 10);
+            box(s, 8, 0, 12, 12);
             for (int i = 0; i < int(std::min<size_t>(party_.size(), 4)); i++) put(s, 10, 2 + i * 2, name(i));
         }
         box(s, 0, 15, 20, 3);
@@ -181,6 +272,27 @@ std::array<uint8_t, 360> FieldMenu::screen() const {
     }
     case State::Bag: list(true); break;
     case State::Items: list(false); break;
+    case State::Spells: {
+        box(s, 0, 0, 20, 14);
+        const auto sp = const_cast<FieldMenu*>(this)->spells(member_);
+        for (int i = 0; i < 6 && first_ + i < int(sp.size()); i++) {
+            put(s, 2, 2 + i * 2, itemName(rom_, sp[size_t(first_ + i)].id));
+            std::snprintf(buf, sizeof buf, "%2d", sp[size_t(first_ + i)].cost);
+            putStr(s, 16, 2 + i * 2, buf);
+        }
+        if (sp.empty()) putStr(s, 2, 2, "(none)");
+        break;
+    }
+    case State::Target: {
+        box(s, 0, 0, 20, 12);
+        for (int i = 0; i < int(std::min<size_t>(party_.size(), 4)); i++) {
+            const CharRecord& r = party_[size_t(i)];
+            put(s, 2, 2 + i * 2, name(i));
+            std::snprintf(buf, sizeof buf, "%3d/%3d", r.hp(), r.maxHp());
+            putStr(s, 12, 2 + i * 2, buf);
+        }
+        break;
+    }
     case State::Status: {
         box(s, 0, 0, 20, 18);
         const CharRecord& r = party_[size_t(member_)];

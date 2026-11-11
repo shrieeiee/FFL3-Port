@@ -110,6 +110,7 @@ int main(int argc, char** argv) {
     int mapId = -1, scale = 5, startRow = -1, startCol = -1;
     bool wide = false, debug = false, showSlots = false, mute = false;
     std::string wavKind;
+    int partyHp = -1;
     int wavId = 0;
     double wavSecs = 0;
     for (int i = 1; i < argc; i++) {
@@ -125,6 +126,7 @@ int main(int argc, char** argv) {
         else if (a == "--battle" && i + 1 < argc) battleArg = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--keys" && i + 1 < argc) keys = argv[++i];
         else if (a == "--dump-view" && i + 1 < argc) dumpView = argv[++i];
+        else if (a == "--party-hp" && i + 1 < argc) partyHp = std::atoi(argv[++i]);   // test: set HP, print party
         else if (a == "--ram" && i + 1 < argc) ramPokes = argv[++i];     // ADDR:VAL,... into battle RAM
         else if (a == "--shot-at" && i + 1 < argc) shotAt = std::atoi(argv[++i]);
         else if (a == "--dump-blocks" && i + 1 < argc) dumpTiles = argv[++i];
@@ -294,7 +296,10 @@ int main(int argc, char** argv) {
     field.playSfx = [&](int id) { sndSfx(id); };
     field.openShop = openShop;
     std::unique_ptr<FieldMenu> menu;
-    auto openMenu = [&] { menu = std::make_unique<FieldMenu>(rom, battleRam, party, [&] { return saveGame("ffl3.sav"); }); };
+    auto openMenu = [&] {
+        menu = std::make_unique<FieldMenu>(rom, battleRam, party, [&] { return saveGame("ffl3.sav"); });
+        menu->playSfx = [&](int id) { sndSfx(id); };
+    };
     auto chest = [&](int slot, const MapObject& o) {           // 00:09D7
         const int k = o.id - 1;
         if (o.id == 0 || k >= 0x80 || flags.chest.test(size_t(k))) { text.open(1, 0x611d); return; }   // "Empty"
@@ -321,21 +326,23 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> tint;
     auto refreshTiles = [&] { if (tiles.map != field.mapId()) tiles.build(rom, field); };
 
+    // --ram ADDR:VAL,...: poke battle RAM (inventory etc.) and party records, for tests
+    for (size_t p = 0; p < ramPokes.size();) {
+        unsigned a, v;
+        if (std::sscanf(ramPokes.c_str() + p, "%x:%x", &a, &v) == 2) {
+            battleRam[a & 0xffff] = uint8_t(v);
+            if (a >= 0xc500 && a < 0xc6e0 && (a - 0xc500) / 0x60 < party.size())   // party records
+                party[(a - 0xc500) / 0x60].raw[(a - 0xc500) % 0x60] = uint8_t(v);
+        }
+        const size_t c = ramPokes.find(',', p);
+        if (c == std::string::npos) break;
+        p = c + 1;
+    }
+
     // ---- headless: a battle. --battle HH (hFFCA: formation | $80 fixed counts), --keys script:
     //   A B U D L R = press (then 4 frames), W = 30 frames, * = mash A until the battle ends.
     //   --shot out.bmp saves the screen when the script ends (or at frame --shot-at N).
     if (battleArg >= 0) {
-        for (size_t p = 0; p < ramPokes.size();) {
-            unsigned a, v;
-            if (std::sscanf(ramPokes.c_str() + p, "%x:%x", &a, &v) == 2) {
-                battleRam[a & 0xffff] = uint8_t(v);
-                if (a >= 0xc500 && a < 0xc6e0 && (a - 0xc500) / 0x60 < party.size())   // party records
-                    party[(a - 0xc500) / 0x60].raw[(a - 0xc500) % 0x60] = uint8_t(v);
-            }
-            const size_t c = ramPokes.find(',', p);
-            if (c == std::string::npos) break;
-            p = c + 1;
-        }
         field.startBattle(battleArg);
         int frameNo = 0;
         bool shotDone = false;
@@ -454,6 +461,7 @@ int main(int argc, char** argv) {
 
     // ---- headless: tests / tooling ----------------------------------------------------
     if (!dumpTiles.empty() || !shot.empty() || !walk.empty() || !savePath.empty()) {
+        if (partyHp >= 0) for (auto& r : party) r.setHp(partyHp);
         if (!dumpTiles.empty()) {
             FILE* f = std::fopen(dumpTiles.c_str(), "wb");
             if (!f) return 1;
@@ -498,6 +506,11 @@ int main(int argc, char** argv) {
         }
         if (!savePath.empty() && !saveGame(savePath.c_str())) return 1;
         if (shop) std::printf("shop open, gold %d\n", shop->gold());
+        if (partyHp >= 0) {
+            std::printf("party:");
+            for (auto& r : party) std::printf(" %d/%d,%d/%d,s%02X", r.hp(), r.maxHp(), r.mp(), r.maxMp(), r.raw[1]);
+            std::printf("\n");
+        }
         if (!shot.empty()) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
             renderTextBox(text, tiles, opts, frame);

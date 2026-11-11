@@ -1,4 +1,5 @@
 #include "battlenatives.h"
+#include <functional>
 
 namespace ffl3 {
 
@@ -648,6 +649,127 @@ bool runLogicNative(BattleVM& vm, const Rom& rom, uint16_t addr) {
     default:
         return false;
     }
+}
+
+// ---- field item / magic use (bank 9) ---------------------------------------------------
+namespace {
+struct FieldUse {
+    BattleVM& vm; const Rom& rom; const std::function<uint8_t()>& rand8; const std::function<void(int)>& sfx;
+    uint16_t rec(int off) { return uint16_t(0xc500 + memberOffset(vm, rom) + off); }
+    uint16_t w(uint16_t a) { return uint16_t(vm.rd(a) | vm.rd(uint16_t(a + 1)) << 8); }
+    void setW(uint16_t a, uint16_t v) { vm.wr(a, uint8_t(v)); vm.wr(uint16_t(a + 1), uint8_t(v >> 8)); }
+    bool dead() { return vm.rd(rec(1)) & 0x40; }                       // 09:52F9
+    uint8_t amount() {                                                 // 09:536D
+        sfx(0x17);
+        uint8_t b = vm.rd(0xcedc) >> 1, a = rand8();
+        if (!b) a = 0;
+        while (a >= b && a) a >>= 1;
+        return uint8_t(b + a);
+    }
+    void healTo(uint16_t heal) {                                       // 09:5420 / 545A
+        const uint16_t hp = w(rec(0x10)), max = w(rec(0x12));
+        const uint16_t sum = uint16_t(hp + heal);
+        setW(rec(0x10), sum > max ? max : sum);
+    }
+    uint16_t mul(uint8_t a, uint16_t de) {                             // 00:246B
+        uint16_t hl = 0;
+        for (int i = 0; i < 8; i++) { if (a & 1) hl = uint16_t(hl + de); a = uint8_t(a >> 1 | a << 7); de = uint16_t(de << 1); }
+        return hl;
+    }
+    void healPercent() { healTo(uint16_t(mul(vm.rd(0xcedc), w(rec(0x12))) / 10)); }   // 09:542C
+    void healFixed() { healTo(mul(vm.rd(0xcedc), 10)); }                               // 09:53F4
+    void cureAll() { sfx(0x18); vm.wr(rec(1), 0); }                                    // 09:53D1
+    void statUp(int de) {                                              // 09:5303-5310
+        const uint8_t c = vm.rd(rec(0x0d));
+        const uint16_t at = rec(0x0d + de);
+        uint8_t b = amount();
+        uint8_t a = uint8_t(b + vm.rd(at));
+        vm.wr(at, a);
+        if (a >= 0x64) { vm.wr(at, 0x63); b = uint8_t(b - uint8_t(a - 0x63)); }
+        if (c & 7) return;
+        const uint16_t cur = uint16_t(at - 0x1a);
+        vm.wr(cur, uint8_t(vm.rd(cur) + b));
+    }
+    void maxHpUp() {                                                   // 09:5338
+        const uint16_t at = rec(0x30);
+        uint8_t b = amount();
+        const unsigned lo = vm.rd(at) + b;
+        vm.wr(at, uint8_t(lo));
+        const uint8_t hi = uint8_t(vm.rd(uint16_t(at + 1)) + (lo >> 8));
+        vm.wr(uint16_t(at + 1), hi);
+        if (hi > 3 || (hi == 3 && uint8_t(lo) >= 0xe8)) {               // 5360: cap at 999
+            b = uint8_t(b + uint8_t(0xe7 - uint8_t(lo)));
+            vm.wr(at, 0xe7); vm.wr(uint16_t(at + 1), 0x03);
+        }
+        if (vm.rd(rec(0x0d)) & 7) return;
+        setW(rec(0x12), uint16_t(w(rec(0x12)) + b));                    // 00:1D5A -> 0C:7F9E
+        setW(rec(0x10), uint16_t(w(rec(0x10)) + b));
+    }
+    bool effect() {                                                    // 09:52CF
+        uint8_t e = uint8_t((vm.rd(0xcedd) & 0x3f) - 0x18);
+        if (e >= 5) e = uint8_t(e - 5);
+        switch (e) {
+        case 0:                                                        // 5395
+            if (vm.rd(0xce26) == 0xca) { setW(rec(0x14), w(rec(0x16))); cureAll(); healPercent(); return true; }
+            if (dead()) return true;
+            sfx(0x17); healPercent(); return true;
+        case 1: {                                                      // 53B9: cure a status
+            sfx(0x18);
+            const uint8_t x = vm.rd(0xcedb) & 0x0f;
+            const uint8_t v = rom.b(0x0b, uint16_t(0x7114 + x));      // 0B:7400
+            const uint8_t mask = (x < 7 || x >= 0x0a) ? v : 0;
+            vm.wr(rec(1), uint8_t(vm.rd(rec(1)) & ~mask));
+            return true;
+        }
+        case 2: sfx(0x3b); return false;                               // 1E83
+        case 3: cureAll(); return true;                                // 53D1: revive
+        case 4:                                                        // 53DF
+            if (dead()) return true;
+            sfx(0x17);
+            if (vm.rd(0xce25) || vm.rd(0xce26) >= 0x30) healFixed(); else healPercent();
+            return true;
+        case 5: statUp(0x25); return true;
+        case 6: statUp(0x26); return true;
+        case 7: statUp(0x27); return true;
+        case 8: maxHpUp(); return true;
+        case 9: sfx(0x17); setW(rec(0x14), w(rec(0x16))); return true; // 5383
+        default: return false;
+        }
+    }
+};
+}
+
+bool fieldUse(BattleVM& vm, const Rom& rom, const std::function<uint8_t()>& rand8,
+              const std::function<void(int)>& sfx) {
+    FieldUse u{vm, rom, rand8, sfx};
+    vm.wr(0xcd37, 0);
+    itemInfo(vm, rom);                                                 // the menu's 09:5D7F
+    if (!vm.rd(0xce25)) {                                              // 09:521A
+        const uint8_t a = vm.rd(0xce26);
+        if (a < 0x30) {                                                // 52B7: pay the MP
+            const uint8_t keep = vm.rd(0xcd36);
+            vm.wr(0xcd36, vm.rd(0xce1c));
+            const uint16_t mp = u.rec(0x14);
+            u.setW(mp, uint16_t(u.w(mp) - vm.rd(0xce29)));
+            vm.wr(0xcd36, keep);
+        } else if (a < 0xc0) {
+            vm.wr(0xce26, a < 0x78 ? vm.rd(0xcee0) : vm.rd(0xcede));
+            vm.wr(0xce27, 0);
+        }
+    }
+    itemInfo(vm, rom);                                                 // rst18 2A = 09:5D7F
+    const uint8_t e = vm.rd(0xcedd) & 0x3f;
+    bool party = false;
+    if (e >= 0x27) { sfx(0x3b); return false; }
+    if (e < 0x22) {
+        if (e < 0x18 || e >= 0x1d) { sfx(0x3b); return false; }
+        party = vm.rd(0xcd36) & 0x80;
+    }
+    if (!party) return u.effect();
+    const int n = vm.rd(0xc683) == 0xff ? 4 : 5;                       // 0B:6D12: guest?
+    bool ok = true;
+    for (int i = 0; i < n; i++) { vm.wr(0xcd36, uint8_t(i)); ok = u.effect() && ok; }
+    return ok;
 }
 
 } // namespace ffl3

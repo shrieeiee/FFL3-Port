@@ -78,8 +78,14 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   bytecode's own sound effects (it writes hFFBC), chest / shop jingles and error buzz.
 - `--mute` turns sound off; `--wav music|sfx HEXID SECONDS` renders `ffl3.wav`.
 
+**Milestone 9 – using things outside battle** ✅
+- Field menu Items / Magic: items and spells run through the game's own field code (09:521A):
+  Cure-type healing (fixed for items, % of max HP for spells), Elixir, MP refills, status
+  cures, revive, stat and max-HP seeds, whole-party effects, MP paid by the caster. Usability
+  and targets come from 09:5D87 like in battle.
+
 Not yet: event $10 and most $12 effects, the shop / menu screens' exact
-original layouts (the port's own for now), using items from the field menu, the battle
+original layouts (the port's own for now), the battle
 "Auto set" mode, battle animations, NPC wandering, the opening sequence.
 
 ## Building
