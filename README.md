@@ -90,6 +90,10 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Story changes to maps (0B:78F5): 47 flag-gated block patches applied on map load and by
   event $1F, e.g. opened passages.
 - Pushable boulders (move type $0B, 01:51FE) and the hole puzzle (event $2B).
+- The Talon: the cockpit (event $23, 01:7972) with its own windows and texts - Depart,
+  Engine, Weapon and Option (Warp not yet); parts in the bag get attached with their story
+  flags; take-off mode from flags $39/$3A and the engine (01:63E6); flying (modes 6-8 go
+  anywhere), B lands back in the cockpit, A on the parking spot goes aboard.
 - Townsfolk wander (01:4F66 / 5060): move types 0-3 and $1B-$1E take a random step about
   once a second at half walking speed, blocked by walls, event blocks and people.
 - Map event blocks: damage floors ($20), status-cure ($21) and healing ($22) spots, the

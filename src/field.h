@@ -60,7 +60,6 @@ public:
     int cols() const { return layout_.bw; }
     uint8_t layer() const { return layer_; }          // wCA12: $00 outside, $40 inside
     int vehicle() const { return vehicle_; }          // wC6E3
-    void setVehicle(int v) { vehicle_ = v; }
     uint8_t blockAt(int row, int col) const;
     int blocksVersion() const { return blocksVersion_; }   // bumped when events rewrite blocks
     uint8_t attrAt(int row, int col) const;
@@ -84,9 +83,18 @@ public:
     std::function<void(int item)> giveItem;                   // event $18
     std::function<void(int id)> playSfx;
     bool wander = false;               // NPC random walks (01:4F66); off for headless tests
+    // The Talon: the spot it is parked at (wC6E9-C6ED), flying off from it and landing.
+    struct Spot { int map, row, col; };
+    Spot savedSpot() const { return {saved_.map, saved_.row, saved_.col}; }
+    void setSavedSpot(Spot s) { saved_ = {s.map, s.row, s.col}; }
+    void takeOff(int mode);            // 01:63E6
+    bool land();                       // B in the Talon: 01:4250 -> into the Talon (map $10)
+    bool boardTalon();                 // A on its parking spot: 01:631A
+    void setVehicle(int mode);         // wC6E3 + 00:08AD: leader sprite / animation for the mode
     std::function<void(int slot, int character)> joinParty;    // event $10 1x/2x (0B:6DE4)
     std::function<void(int slot)> leaveParty;                  // event $10 0x (0B:6E33)
     std::function<void(uint16_t addr, uint8_t v)> pokeRam;
+    std::function<void()> talonConsole;                        // event $23 (01:7972)
     std::function<void()> healParty;                           // event $22 (01:7701)
     std::function<void()> hurtParty;                           // event $20 (1a34): HP -2, min 1
     std::function<void()> cureParty;                           // event $21 (1a6d -> 09:53D1)     // game RAM writes (party records, wC6xx)                       // event $1D / step sounds

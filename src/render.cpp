@@ -1,4 +1,5 @@
 #include "render.h"
+#include "console.h"
 
 namespace ffl3 {
 
@@ -90,7 +91,7 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
     }
     int sx, sy, tile; bool flip;
     screenPos(p, sx, sy);
-    frameFor(p, 0, tile, flip);
+    frameFor(p, p.spriteTile, tile, flip);
     drawSprite(tc, o.obp, out, sx, sy, tile, flip);
 }
 
@@ -169,6 +170,7 @@ static void renderOverlay(const T& w, const TileCache& tc, const RenderOpts& o, 
             if (t[size_t(y * 8 + x)]) out.px[size_t(cr * 8 + y) * size_t(out.w) + size_t(cx + x)] = uint8_t((o.obp >> (t[size_t(y * 8 + x)] * 2)) & 3);
 }
 void renderMenu(const FieldMenu& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
+void renderConsole(const TalonConsole& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
 
 // ---- battle --------------------------------------------------------------------------------
 

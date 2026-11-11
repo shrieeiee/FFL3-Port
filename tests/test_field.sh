@@ -23,6 +23,10 @@ check "new game starts aboard the Talon"         "map 0B layout 0F gfx 21 sprite
 check "new game: step off the Talon -> map 10 at 7,16 (game)" "map 10 layout 04 gfx 04 sprites 04  16x16  player 7,16" --walk DW
 check "Talon round trip: out, back on board (game)" "map 0B layout 0F gfx 21 sprites 01  8x16  player 26,7" --walk DWD
 # Every NPC text must parse exactly up to the next one (validates control-code lengths).
+check "Talon cockpit: Depart needs flag 5 (01:79B3)" "map 10 layout 04 gfx 04 sprites 04  16x16  player 5,16" --map 10 --pos 5,16 --walk UAA
+check "Talon: takes off from wC6E9 (01:63E6)" "map 01 layout 1C gfx 17 sprites 19  32x32  player 21,21  npcs 1  [took off]" --flag 5 --map 10 --pos 5,16 --walk UAA
+check "Talon: flies over mountains (mode 6)" "player 25,25" --flag 5 --flag 3a --map 10 --pos 5,16 --walk UAARRRRDDDD
+check "Talon: B lands, back in the cockpit (01:4250)" "player 5,16  npcs 1  [landed]" --flag 5 --flag 3a --map 10 --pos 5,16 --walk UAARRRRDDDDB
 python3 -I "$(dirname "$0")/../tools/ffl3text.py" "$ROM" | grep -q "239 NPC texts: 239 end exactly" \
   && echo "ok   all 239 NPC texts parse exactly" || { echo "FAIL NPC text parse"; fail=1; }
 exit $fail

@@ -77,6 +77,7 @@ bool Field::enterMap(int map, int row, int col, Dir facing) {
             }
     }
     layer_ = blockAt(p.row, p.col) & 0x40;
+    setVehicle(vehicle_);
     char buf[96];
     std::snprintf(buf, sizeof buf, "entered map %02X at %d,%d", map, p.row, p.col);
     lastEvent_ = buf;
@@ -99,7 +100,7 @@ const std::array<uint8_t, 4>& Field::drawnTiles(uint8_t block) const {
 // wCA0F from the vehicle table 00:087A (mask, wC6F1 pairs). Mode 0 = on foot in towns ($FF),
 // mode 2 = on foot on the world map ($40: only the sea blocks). Events $0A/$0B/$0C switch it.
 uint8_t Field::vehicleMask() const {
-    if (vehicle_ < 0 || vehicle_ > 5) return 0xff;
+    if (vehicle_ < 0 || vehicle_ > 8) return 0xff;              // modes 6-8: $00, flies anywhere
     return rom_.b(0, uint16_t(0x87a + vehicle_ * 2));
 }
 
@@ -111,6 +112,7 @@ bool Field::passable(int row, int col) const {
     if (a == 0xeb) return false;
     if ((a & 0xc0) == 0xc0) return true;
     if ((a & 0xc0) == 0x80) return true;
+    if (map_ < 6 && vehicle_ == 2) return (a & 0x40) != 0;      // 00:1058: the Talon at sea
     return (a & 0x47 & leaderFlags_ & vehicleMask()) == 0;
 }
 
@@ -152,6 +154,43 @@ bool Field::objectPassable(int row, int col) const {
     if ((a & 0xc0) == 0xc0) return false;
     if ((a & 0xc0) == 0x80) return true;
     return (a & 0x45) == 0;
+}
+
+void Field::setVehicle(int mode) {
+    vehicle_ = mode;
+    Actor& p = actors_[0];
+    // 00:088C: modes 1-8 draw the leader from OBJ tile $20 / $28 / $10 (the Talon)
+    static const uint8_t tile[9] = {0x00, 0x20, 0x28, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10};
+    p.spriteTile = (mode >= 0 && mode < 9) ? tile[mode] : 0;
+    Actor& f = actors_[1];
+    if (f.used) f.id = mode >= 3 ? 0 : f.savedId;              // the follower boards too
+}
+
+void Field::takeOff(int mode) {
+    const Dir d = actors_[0].facing;
+    enterMap(saved_.map, saved_.row, saved_.col, d);
+    setVehicle(mode);
+    lastEvent_ = "took off";
+}
+
+// 01:631A: A on foot on the Talon's parking spot: go aboard (map $10, scroll ($20, $B0)).
+bool Field::boardTalon() {
+    const Actor& p = actors_[0];
+    if (vehicle_ != 0 || p.moveFrames || map_ != saved_.map || p.row != saved_.row || p.col != saved_.col) return false;
+    flags_.event.set(0x09);
+    enterMap(0x10, 7, 16, Dir::Up);
+    lastEvent_ = "boarded the Talon";
+    return true;
+}
+
+bool Field::land() {
+    if (vehicle_ < 2 || actors_[0].moveFrames) return false;    // 00:0861: modes 2-8 -> 01:4250
+    const Actor& p = actors_[0];
+    saved_ = {map_, p.row, p.col};                             // 4250: wC6E4 -> wC6E9
+    setVehicle(0);
+    enterMap(0x10, 5, 16, Dir::Up);                            // 636D: scroll (0, $B0) on map $10
+    lastEvent_ = "landed";
+    return true;
 }
 
 // 0B:78F5 (map load, and event $1F): story changes to a map's blocks. 47 entries: map
@@ -442,6 +481,7 @@ void Field::runEventCommand(int cmd, int param) {
         if (playSfx) playSfx(0x18);
         return;
     case 0x2d: case 0x2e: case 0x30: case 0x31: return;                // 12db: nothing
+    case 0x23: if (talonConsole) talonConsole(); return;               // 19b8 -> 01:7972
     case 0x2a: if (openText) openText(0xa, 0x7a7d); return;            // 1bd7: rst $A0 0A:7A7D
     case 0x1f: applyMapPatches(); return;                              // 137c -> 0B:78F5
     case 0x22:                                                         // 1a84: rest (fade, heal)

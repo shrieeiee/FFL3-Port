@@ -48,6 +48,8 @@ struct BattleGfx {
 // Shop / inn window over the field.
 void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Frame& out);
 void renderMenu(const FieldMenu& menu, const TileCache& tc, const RenderOpts& o, Frame& out);
+class TalonConsole;
+void renderConsole(const TalonConsole& c, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out);
 

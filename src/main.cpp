@@ -10,6 +10,7 @@
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "render.h"
 #include "sound.h"
+#include "console.h"
 #include <functional>
 #include <SDL.h>
 #include <algorithm>
@@ -112,6 +113,7 @@ int main(int argc, char** argv) {
     std::string wavKind;
     int partyHp = -1;
     bool wanderOpt = false;
+    std::vector<int> setFlags;
     int wavId = 0;
     double wavSecs = 0;
     for (int i = 1; i < argc; i++) {
@@ -136,6 +138,7 @@ int main(int argc, char** argv) {
         else if (a == "--debug") debug = true;
         else if (a == "--mute") mute = true;
         else if (a == "--wander") wanderOpt = true;
+        else if (a == "--flag" && i + 1 < argc) setFlags.push_back(int(std::strtol(argv[++i], nullptr, 16)));   // test: set event flag
         else if (a == "--wav" && i + 3 < argc) {      // --wav music|sfx ID SECONDS (writes ffl3.wav)
             wavKind = argv[++i]; wavId = int(std::strtol(argv[++i], nullptr, 16)); wavSecs = std::atof(argv[++i]);
         }
@@ -255,6 +258,11 @@ int main(int argc, char** argv) {
             if (size_t(i) < party.size()) std::fwrite(party[size_t(i)].raw.data(), 1, 0x60, f);
             else for (int k = 0; k < 0x60; k++) std::fputc(0xff, f);
         }
+        const Field::Spot sp = field.savedSpot();               // wC6E9-C6ED: where the Talon is
+        const int sx = (sp.row - 5) * 16, sy = (sp.col - 5) * 16;
+        battleRam[0xc6e9] = uint8_t(sx); battleRam[0xc6ea] = uint8_t(sx >> 8);
+        battleRam[0xc6eb] = uint8_t(sy); battleRam[0xc6ec] = uint8_t(sy >> 8);
+        battleRam[0xc6ed] = uint8_t(sp.map);
         std::fwrite(battleRam.data(), 1, battleRam.size(), f);
         std::fclose(f);
         return true;
@@ -286,6 +294,8 @@ int main(int argc, char** argv) {
         battleRam = tmp;
         battle.reset();
         text.close();
+        field.setSavedSpot({battleRam[0xc6ed], (battleRam[0xc6e9] | battleRam[0xc6ea] << 8) / 16 + 5,
+                            (battleRam[0xc6eb] | battleRam[0xc6ec] << 8) / 16 + 5});
         field.setVehicle(hdr[4]);
         field.enterMap(hdr[0], hdr[1], hdr[2], Dir(hdr[3] & 3));
         return true;
@@ -329,6 +339,15 @@ int main(int argc, char** argv) {
     field.leaveParty = [&](int slot) { party[size_t(slot)].raw[3] = 0xff; };   // 0B:6E33: +3 = $FF
     field.openShop = openShop;
     std::unique_ptr<FieldMenu> menu;
+    std::unique_ptr<TalonConsole> console;
+    field.talonConsole = [&] {
+        console = std::make_unique<TalonConsole>(rom, battleRam, flags);
+        console->playSfx = [&](int id) { sndSfx(id); };
+    };
+    auto consoleDone = [&] {
+        if (console->result() == 1) { text.close(); field.takeOff(console->takeOffMode()); }
+        console.reset();
+    };
     auto openMenu = [&] {
         menu = std::make_unique<FieldMenu>(rom, battleRam, party, [&] { return saveGame("ffl3.sav"); });
         menu->playSfx = [&](int id) { sndSfx(id); };
@@ -341,6 +360,11 @@ int main(int argc, char** argv) {
         field.openChest(slot);
     };
     text.log = [&](const std::string& m) { field.setLastEvent(m); };
+    // New game: the Talon is parked on world map 1 at scroll ($100, $100) (wC6E9-C6ED from RAM);
+    // wC6F8-C6FB: part $D8 attached, no engine chosen.
+    field.setSavedSpot({1, 21, 21});
+    for (int f : setFlags) flags.event.set(size_t(f & 0xff));
+    battleRam[0xc6f8] = 0x80; battleRam[0xc6f9] = 0; battleRam[0xc6fa] = 0xff;
     if (!loadPath.empty()) {
         if (!loadGame(loadPath.c_str())) { std::fprintf(stderr, "can't load %s\n", loadPath.c_str()); return 1; }
     } else if (mapId < 0) {                                  // new game
@@ -511,6 +535,14 @@ int main(int argc, char** argv) {
         // Script: U/D/L/R step, A = press A (talk / advance text) then 40 frames, W = 60 frames.
         for (char c : walk) {
             if (c == 'M' && !menu) { openMenu(); continue; }
+            if (console) {                              // A / B / U / D drive the Talon cockpit
+                ConsoleInput in;
+                in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
+                console->tick(in);
+                if (console->done()) consoleDone();
+                continue;
+            }
+            if (c == 'B' && !text.active() && field.land()) continue;   // land the Talon
             if (menu) {                                 // A / B / U / D drive the menu
                 MenuInput in;
                 in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
@@ -527,7 +559,7 @@ int main(int argc, char** argv) {
             }
             if (c == 'A' || c == 'a') {
                 if (text.active()) text.tick(true, true, false, false);
-                else talk(rom, field, text, chest, openShop);
+                else if (!field.boardTalon()) talk(rom, field, text, chest, openShop);
                 for (int i = 0; i < 40; i++) { field.tick(-1); text.tick(false, false, false, false); }
                 continue;
             }
@@ -556,6 +588,7 @@ int main(int argc, char** argv) {
             renderTextBox(text, tiles, opts, frame);
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);
+            if (console) renderConsole(*console, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
             if (!saveBmp(argb, frame.w, frame.h, shot.c_str())) return 1;
         }
@@ -681,13 +714,20 @@ int main(int argc, char** argv) {
                 in.left = left && !leftPrev; in.right = right && !rightPrev;
                 battle->tick(in);
                 if (battle->finished()) finishBattle();
+            } else if (console) {
+                ConsoleInput in;
+                in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
+                console->tick(in);
+                if (console->done()) consoleDone();
             } else if (text.active()) {
                 field.wander = false;                // NPCs stand still while someone talks
                 field.tick(-1);                      // scripted actor moves animate under text
                 field.wander = true;
                 text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
             } else {
-                if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
+                if (aPressed && !field.player().moveFrames && field.boardTalon()) {}
+                else if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
+                else if (bHeld && !bPrev && field.land()) {}            // B in the air: land (01:4250)
                 else field.tick(d);
             }
             const int wantMusic = battle ? battle->formation().music() : field.music;   // 0B:4000 / map header
@@ -703,6 +743,7 @@ int main(int argc, char** argv) {
             renderTextBox(text, tiles, opts, frame);
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);
+            if (console) renderConsole(*console, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         }
         if (!tex || texW != frame.w) {
