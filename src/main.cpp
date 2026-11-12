@@ -12,6 +12,10 @@
 #include "sound.h"
 #include "console.h"
 #include "opening.h"
+#include "bugreport.h"
+#include <filesystem>
+#include <ctime>
+#include <csignal>
 #include <functional>
 #include <SDL.h>
 #include <algorithm>
@@ -155,6 +159,18 @@ int main(int argc, char** argv) {
         else romPath = a;
     }
 
+    std::string exeDir = ".";
+    if (char* bp = SDL_GetBasePath()) { exeDir = bp; SDL_free(bp); }
+    {                                                   // double-clicked: look next to the exe
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        if (!fs::exists(romPath, ec)) {
+            if (fs::exists(fs::path(exeDir) / romPath, ec)) romPath = (fs::path(exeDir) / romPath).string();
+            else
+                for (const auto& de : fs::directory_iterator(exeDir, ec))
+                    if (de.path().extension() == ".gb" || de.path().extension() == ".GB") { romPath = de.path().string(); break; }
+        }
+    }
     Rom rom;
     std::string err;
     if (!rom.load(romPath, err)) {
@@ -815,6 +831,67 @@ int main(int argc, char** argv) {
     SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     SDL_Texture* tex = nullptr;
     int texW = 0, shotN = 0;
+#ifndef FFL3_VERSION
+#define FFL3_VERSION "dev"
+#endif
+    // ---- tester support: input / event log, F12 bug reports, crash reports, F10 commands ----
+    BugLog buglog;
+    std::string toast;                                  // notice across the top of the screen
+    int toastFrames = 0;
+    auto notify = [&](const std::string& msg, int frames = 300) { toast = msg; toastFrames = frames; buglog.event("NOTICE " + msg); };
+    field.onUnknownEvent = [&](const char* what) {
+        notify(std::string("Not done yet: ") + what + " - press F12 to report");
+    };
+    auto infoText = [&] {
+        std::string s = "FFL3 port " FFL3_VERSION "\n";
+        char b[256];
+        const std::time_t t = std::time(nullptr);
+        std::strftime(b, sizeof b, "time %Y-%m-%d %H:%M:%S\n", std::localtime(&t)); s += b;
+        std::snprintf(b, sizeof b, "frame %llu\nmap %02X row %d col %d facing %d vehicle %d\n",
+                      static_cast<unsigned long long>(buglog.frameNo()), field.mapId(), field.player().row,
+                      field.player().col, int(field.player().facing), field.vehicle());
+        s += b;
+        s += std::string("screen: ") + (opening ? "opening" : battle ? "battle" : shop ? "shop" : menu ? "menu" : console ? "cockpit" : text.active() ? "text" : "field") + "\n";
+        if (battle) { std::snprintf(b, sizeof b, "battle formation %02X\n", battle->formation().index); s += b; }
+        s += "party:";
+        for (auto& r : party) { std::snprintf(b, sizeof b, " %d/%d", r.hp(), r.maxHp()); s += b; }
+        s += "\nlast event: " + field.lastEvent() + "\n";
+        return s;
+    };
+    auto writeReport = [&](bool crash) {
+        const std::string dir = newReportDir(exeDir);
+        buglog.write(dir, infoText() + (crash ? "CRASH\n" : ""));
+        saveBmp(argb, frame.w, frame.h, (std::filesystem::path(dir) / "screen.bmp").string().c_str());
+        if (!crash) saveGame((std::filesystem::path(dir) / "game.sav").string().c_str());
+        return dir;
+    };
+    installCrashHandler([&] { writeReport(true); });
+    bool prompt = false;                                // F10: tester command line
+    std::string promptLine;
+    std::string lastLogged;
+    auto runCommand = [&](const std::string& line) {
+        char cmd[32] = {};
+        unsigned a = 0, b = 0, c = 0;
+        const int n = std::sscanf(line.c_str(), "%31s %x %u %u", cmd, &a, &b, &c);
+        const std::string k = cmd;
+        buglog.event("COMMAND " + line);
+        if (k == "battle" && n >= 2 && !battle) { field.startBattle(int(a)); return std::string("battle ") + line.substr(7); }
+        if (k == "map" && n >= 2) {
+            field.setVehicle(a < 6 ? 2 : 0);
+            if (n >= 4) field.enterMap(int(a), int(b), int(c)); else field.enterMap(int(a));
+            return std::string("map ") + line.substr(4);
+        }
+        if (k == "fx") { if (n >= 2) SDL_setenv("FFL3_FORCEFX", line.substr(3).c_str(), 1); else SDL_setenv("FFL3_FORCEFX", "", 1); return std::string("next attack plays sprite script ") + line.substr(2); }
+        if (k == "effect" && n >= 2) { SDL_setenv("FFL3_FORCEEFFECT", line.substr(7).c_str(), 1); return std::string("next attack plays effect ") + line.substr(7); }
+        if (k == "death" && n >= 2) { SDL_setenv("FFL3_DEATHSTYLE", line.substr(6).c_str(), 1); return std::string("monster deaths use style ") + line.substr(6); }
+        if (k == "normal") { SDL_setenv("FFL3_FORCEFX", "", 1); SDL_setenv("FFL3_FORCEEFFECT", "", 1); SDL_setenv("FFL3_DEATHSTYLE", "", 1); return std::string("animations back to normal"); }
+        if (k == "heal") {
+            for (auto& r : party) { r.raw[0x10] = r.raw[0x12]; r.raw[0x11] = r.raw[0x13]; r.raw[0x14] = r.raw[0x16]; r.raw[0x15] = r.raw[0x17]; r.raw[1] &= 0x40; }
+            return std::string("party healed");
+        }
+        if (k == "flag" && n >= 3) { flags.event.set(a & 0xff, b != 0); return std::string("flag set"); }
+        return std::string("commands: battle XX | map XX [row col] | fx XX | effect XX | death N | normal | heal | flag XX 0/1");
+    };
     std::string lastTitle;
     bool running = true;
     Uint64 last = SDL_GetPerformanceCounter();
@@ -826,6 +903,18 @@ int main(int argc, char** argv) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
+            if (prompt) {                                        // typing a tester command
+                if (e.type == SDL_TEXTINPUT) promptLine += e.text.text;
+                if (e.type != SDL_KEYDOWN) continue;
+                if (e.key.keysym.sym == SDLK_BACKSPACE && !promptLine.empty()) promptLine.pop_back();
+                if (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) {
+                    prompt = false;
+                    SDL_StopTextInput();
+                    if (e.key.keysym.sym != SDLK_ESCAPE && !promptLine.empty()) notify(runCommand(promptLine));
+                    else toastFrames = 0;
+                }
+                continue;
+            }
             if (e.type != SDL_KEYDOWN) continue;
             switch (e.key.keysym.sym) {
             case SDLK_ESCAPE: running = false; break;
@@ -848,12 +937,21 @@ int main(int argc, char** argv) {
             case SDLK_F4: if (!battle && !opening && !text.active()) field.startBattle(randomFormation(rom, field.encounterArea(), field.vehicle(), field.random8())); break;
             case SDLK_TAB: wide = !wide; frame.resize(wide ? 256 : 160, 144); break;
             case SDLK_p: pal = (pal + 1) % kNumPalettes; break;
-            case SDLK_F12: {
+            case SDLK_F11: {                                     // plain screenshot
                 char name[64];
                 std::snprintf(name, sizeof name, "ffl3_%02X_%d.bmp", field.mapId(), shotN++);
-                saveBmp(argb, frame.w, frame.h, name);
+                saveBmp(argb, frame.w, frame.h, (std::filesystem::path(exeDir) / name).string().c_str());
+                notify(std::string("screenshot ") + name, 120);
                 break;
             }
+            case SDLK_F12: {                                     // bug report
+                const std::string dir = writeReport(false);
+                notify("Bug report saved: " + std::filesystem::path(dir).filename().string() + " - note what went wrong", 240);
+                break;
+            }
+            case SDLK_F10:
+                prompt = true; promptLine.clear(); SDL_StartTextInput();
+                break;
             default: break;
             }
         }
@@ -864,7 +962,8 @@ int main(int argc, char** argv) {
         if (acc > 0.25) acc = 0.25;
         while (acc >= 1.0 / 60.0) {
             acc -= 1.0 / 60.0;
-            const Uint8* k = SDL_GetKeyboardState(nullptr);
+            static const Uint8 kNoKeys[SDL_NUM_SCANCODES] = {};
+            const Uint8* k = prompt ? kNoKeys : SDL_GetKeyboardState(nullptr);   // typing a command: no game input
             int d = -1;
             if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = int(Dir::Down);
             else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = int(Dir::Up);
@@ -878,6 +977,16 @@ int main(int argc, char** argv) {
             const bool startHeld = k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER];
             const bool startPressed = startHeld && !startPrev;
             startPrev = startHeld;
+            buglog.frame(uint16_t((aHeld ? BugLog::A : 0) | (bHeld ? BugLog::B : 0) | (startHeld ? BugLog::Start : 0) |
+                                  (up ? BugLog::Up : 0) | (down ? BugLog::Down : 0) | (d == int(Dir::Left) ? BugLog::Left : 0) |
+                                  (d == int(Dir::Right) ? BugLog::Right : 0) | (k[SDL_SCANCODE_M] || k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT] ? BugLog::Menu : 0)));
+            if (field.lastEvent() != lastLogged) { lastLogged = field.lastEvent(); if (!lastLogged.empty()) buglog.event(lastLogged); }
+            if (toastFrames > 0 && --toastFrames == 0) toast.clear();
+            if (const char* tr = std::getenv("FFL3_SELFTEST"); tr && buglog.frameNo() == 120) {   // packaging check
+                std::printf("report: %s\n", writeReport(false).c_str());
+                if (std::string(tr) == "crash") std::raise(SIGSEGV);
+                running = false;
+            }
             if (opening == 1 || opening == 3) {
                 OpeningInput in;
                 const bool aKey = k[SDL_SCANCODE_Z] || k[SDL_SCANCODE_SPACE];   // Enter is Start here
@@ -941,9 +1050,11 @@ int main(int argc, char** argv) {
         if (opening == 1 || opening == 3) {
             if (opening == 1) renderTitle(*title, tiles, opts, frame);
             else renderNaming(*naming, tiles, opts, frame);
+            renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], nullptr, argb);
         } else if (battle) {
             renderBattle(*battle, bgfx, tiles, opts, frame);
+            renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], nullptr, argb);
         } else {
             RenderOpts fo = opts;
@@ -953,6 +1064,7 @@ int main(int argc, char** argv) {
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);
             if (console) renderConsole(*console, tiles, opts, frame);
+            renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         }
         if (!tex || texW != frame.w) {

@@ -12,3 +12,4 @@ __pycache__/
 rec/
 *.wav
 *.log
+build-win/

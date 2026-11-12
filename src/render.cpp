@@ -350,4 +350,18 @@ void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, cons
     }
 }
 
+// Tester notices: a white bar with a line of text across the top (wraps to two lines).
+void renderToast(const TileCache& tc, const std::string& msg, Frame& out) {
+    if (msg.empty()) return;
+    const int perLine = out.w / 8;
+    const int lines = int(msg.size() + size_t(perLine) - 1) / perLine > 1 ? 2 : 1;
+    for (int y = 0; y < 8 * lines + 2 && y < out.h; y++)
+        for (int x = 0; x < out.w; x++) out.px[size_t(y) * out.w + x] = 0;
+    for (int l = 0; l < lines; l++) {
+        const std::string part = msg.substr(size_t(l * perLine), size_t(perLine));
+        const Glyphs g = asciiGlyphs(part.c_str());
+        for (size_t i = 0; i < g.size(); i++) putTile(out, tc.bg[g[i]], 0xe4, int(i) * 8, 1 + l * 8, true);
+    }
+}
+
 } // namespace ffl3

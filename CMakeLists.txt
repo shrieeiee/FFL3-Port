@@ -24,10 +24,20 @@ if(NOT SDL2_FOUND)
     endif()
 endif()
 
-add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp src/console.cpp src/uitext.cpp src/opening.cpp src/battleanim.cpp src/fieldanim.cpp)
+add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp src/console.cpp src/uitext.cpp src/opening.cpp src/battleanim.cpp src/fieldanim.cpp src/bugreport.cpp)
 target_include_directories(ffl3core PUBLIC src)
+# The version testers' bug reports carry: git describe, or "dev".
+execute_process(COMMAND git describe --always --dirty WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE FFL3_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT FFL3_GIT)
+    set(FFL3_GIT dev)
+endif()
 
 add_executable(ffl3 WIN32 src/main.cpp)
+target_compile_definitions(ffl3 PRIVATE FFL3_VERSION="${FFL3_GIT}")
+if(MINGW)
+    target_link_options(ffl3 PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
 target_link_libraries(ffl3 PRIVATE ffl3core)
 if(TARGET SDL2::SDL2main)
     target_link_libraries(ffl3 PRIVATE SDL2::SDL2main)

@@ -35,6 +35,8 @@ struct TileCache {
 // text lines on window rows 2, 4, 6. Centred horizontally in wide views.
 void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, Frame& out);
 
+void renderToast(const TileCache& tc, const std::string& msg, Frame& out);
+
 void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame& out,
                  std::vector<uint8_t>* debugTint = nullptr);
 

@@ -147,6 +147,12 @@ Not yet: event $10 $5 / $8 / $A / $C / $F and $12 $07-$09 / $0D-$0F / $11 (vehic
 a member transformation, the ending). The port names them on screen when one comes up. The last prologue walk on the Talon's map is placed at the
 game's hand-over spot rather than walked exactly.
 
+## Testing
+
+`docs/TESTING.md` is the tester's guide: controls, F12 bug reports (screenshot, save, the last
+ten minutes of input and a game log in `bug_reports\`), crash reports, the F10 command line
+(`battle`, `map`, `fx`, `death`...) and a checklist.
+
 ## Building
 
 Needs CMake 3.16+ and a C++20 compiler (coroutines: GCC 10+, Clang 14+, MSVC 2019 16.8+). SDL2 is picked up from the system, or from
@@ -155,6 +161,13 @@ Needs CMake 3.16+ and a C++20 compiler (coroutines: GCC 10+, Clang 14+, MSVC 201
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
+```
+
+Windows build from Linux (MinGW-w64, one self-contained exe):
+
+```sh
+cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build-win --target ffl3
 ```
 
 Windows (Visual Studio 2022): same commands from a Developer prompt, or open the folder in VS.
