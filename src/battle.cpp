@@ -60,8 +60,10 @@ int inventoryAdd(BattleRam& ram, uint8_t id) {
 }
 
 Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, const BattleContext& ctx, int hffca, uint32_t seed)
-    : rom_(rom), ram_(ram), party_(party), vm_(rom) {
+    : rom_(rom), ram_(ram), party_(party), vm_(rom), anim_(rom, vm_.mem) {
     vm_.mem = ram_;
+    anim_.random = [this](uint8_t n) { return rnd(n); };
+    anim_.eraseEnemy = [this](int s) { if (s >= 0 && s < 8) erased_[size_t(s)] = true; };
     vm_.mem[0xff90] = uint8_t(seed);
     vm_.mem[0xff93] = uint8_t(seed >> 8);
     ctx_ = ctx;
@@ -125,6 +127,23 @@ void Battle::setup(int hffca, const BattleContext& ctx, bool retry) {
     M[0xd684] = pictureResidue(rom_, form_.ids);
     battleSetupCombatants(vm_, rom_);
     M[0xddff] = M[0xd203] == 0xff ? 4 : 5;
+    // What bank 0B leaves for the bank 2 animations: picture rects (wCC41 col,row / wCC51
+    // (w-1)<<4 | (h-1)), the video registers, the members' sprites at OBJ $6C.
+    for (size_t k = 0; k < layout_.slots.size() && k < 8; k++) {
+        const EnemySlot& e = layout_.slots[k];
+        const Monster& mo = groups_[size_t(e.group)];
+        M[0xcc41 + k * 2] = uint8_t(e.col);
+        M[0xcc42 + k * 2] = uint8_t(e.row);
+        M[0xcc51 + k] = uint8_t((mo.picW - 1) << 4 | (mo.picH - 1));
+        erased_[k] = false;
+    }
+    M[0xff40] = 0xe7; M[0xff42] = M[0xff43] = 0;
+    M[0xff47] = 0xd2; M[0xff48] = 0xd0; M[0xff49] = 0x90;
+    M[0xcbff] = 0;
+    for (int i = 0; i < 0xa0; i++) M[size_t(0xc000 + i)] = 0;
+    anim_.loadMemberTiles([this](int i) { return memberSprite(i); });
+    M[0xde00] = 0x15;                                  // the party row walks during the intro
+    anim_.start(0x4394);
     std::copy(M.begin() + 0xc6e0, M.begin() + 0xc740, M.begin() + 0xdd00);
     M[0xceda] = 0;
     vm_.start(0x4a2d);
@@ -187,6 +206,7 @@ bool Battle::native(uint16_t addr) {
         vm_.mem[0xce88] = 1;
         lines_.clear(); cur_.clear();
         for (bool& c : cmdSet_) c = false;
+        hidePartyRow();
         state_ = State::FightMenu;
         cursor_ = 0;
         return false;
@@ -205,16 +225,36 @@ bool Battle::native(uint16_t addr) {
         showMessage();
         state_ = State::Message;
         return false;
-    case 0x6001: case 0x6b68: case 0x6b6c: case 0x6b71: case 0x6b7f:   // animations / sound
-        if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9de=%02X\n", addr, m(0xde00), m(0xc9de));
-        timer_ = 16;
-        if (m(0xc9de) >= 5 && m(0xc9de) < 13) { flashSlot_ = m(0xc9de) - 5; flashTimer_ = 16; }   // blink the target
-        state_ = State::Wait;
-        return false;
+    case 0x6001:                                       // 0C:6001: member sprites, then the status mask
+        anim_.loadMemberTiles([this](int i) { return memberSprite(i); });
+        vm_.mem[0xde00] = 0x17;
+        return startAnim(0x4394);
+    case 0x6b68: vm_.mem[0xde00] = 0x11; return startAnim(0x4394);   // "Miss"
+    case 0x6b6c: vm_.mem[0xde00] = 0x10; return startAnim(0x4394);   // damage numbers
+    case 0x6b71: return startAnim(0x4394);                           // effect wDE00
+    case 0x6b7f: return startAnim(0x4000);                           // the action's animation
     default:
         if (std::find(unknownNatives.begin(), unknownNatives.end(), addr) == unknownNatives.end()) unknownNatives.push_back(addr);
         return true;
     }
+}
+
+bool Battle::startAnim(uint16_t entry) {
+    if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9bd=%02X actor=%02X target=%02X\n", entry, m(0xde00), m(0xc9bd), m(0xc9d8), m(0xc9d6));
+    anim_.start(entry);
+    if (!anim_.busy()) return true;
+    state_ = State::Wait;
+    return false;
+}
+
+// Bank 0B takes the party row off the screen for the command menus (the menus have their own
+// portraits); the bytecode puts it back with effect $15 when the turn runs.
+void Battle::hidePartyRow() {
+    for (int i = 0; i < 40; i++) vm_.mem[size_t(0xdc83 + i)] = 0;
+    vm_.mem[0xcbff] = 0;
+    for (int i = 0; i < 0xa0; i++) vm_.mem[size_t(0xc000 + i)] = 0;
+    for (size_t s = 0; s < layout_.slots.size() && s < 8; s++)
+        if (!enemyAlive(int(s))) erased_[s] = true;    // gone without an animation
 }
 
 // Decode the bank 9 battle text at wCE8D/8E into pending glyphs.
@@ -304,7 +344,7 @@ void Battle::endBattle() {
 
 void Battle::tick(const BattleInput& in) {
     vm_.mem[0xff93]++;                                 // the counter 00:39D5 mixes in
-    if (flashTimer_ > 0 && --flashTimer_ == 0) flashSlot_ = -1;
+    anim_.frame();
     auto setCmd = [&](int i, int target) {
         const uint16_t e = uint16_t(0xce00 + i * 4);
         vm_.mem[e] = 0; vm_.mem[uint16_t(e + 1)] = 0;
@@ -322,7 +362,7 @@ void Battle::tick(const BattleInput& in) {
         runVm();
         return;
     case State::Wait:
-        if (--timer_ <= 0) runVm();
+        if (!anim_.busy()) runVm();
         return;
     case State::Message:
         if (--typeDelay_ > 0) return;
@@ -584,7 +624,13 @@ BattleView Battle::view() const {
     BattleView v;
     v.win.fill(0xff);
     for (size_t s = 0; s < layout_.slots.size(); s++)
-        if (enemyAlive(int(s)) && !(int(s) == flashSlot_ && (flashTimer_ & 4))) v.visibleSlots.push_back(int(s));
+        if (s >= 8 || !erased_[s]) v.visibleSlots.push_back(int(s));
+    v.oam = anim_.oam();
+    v.objTiles = &vm_.mem[0x8000];
+    v.scx = m(0xff43); v.scy = m(0xff42);
+    v.bgp = m(0xff47); v.obp0 = m(0xff48); v.obp1 = m(0xff49);
+    v.topBgp = anim_.topBgp; v.topObp = anim_.topObp;
+    v.blank = anim_.blank;
     auto brackets = [&v](int x0, int y0, int x1, int y1) {
         v.objs.push_back({x0, y0, kBracket, false, false});
         v.objs.push_back({x1 - 8, y0, kBracket, true, false});
@@ -657,8 +703,6 @@ BattleView Battle::view() const {
         if (!cur_.empty()) lines.push_back(cur_);
         const size_t first = lines.size() > 2 ? lines.size() - 2 : 0;
         for (size_t i = first; i < lines.size(); i++) putText(v.win, 1, 2 + int(i - first) * 2, lines[i]);
-        for (int i = 0; i < 5; i++)
-            if (memberAlive(i)) v.objs.push_back({8 + i * 32, 72, 0, false, false, i, true});
         break;
     }
     }

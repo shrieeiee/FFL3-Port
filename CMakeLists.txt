@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(ffl3 CXX C)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # SDL2: use a system install if present, otherwise build the bundled copy in third_party/SDL2
@@ -24,7 +24,7 @@ if(NOT SDL2_FOUND)
     endif()
 endif()
 
-add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp src/console.cpp src/uitext.cpp src/opening.cpp)
+add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp src/console.cpp src/uitext.cpp src/opening.cpp src/battleanim.cpp)
 target_include_directories(ffl3core PUBLIC src)
 
 add_executable(ffl3 WIN32 src/main.cpp)

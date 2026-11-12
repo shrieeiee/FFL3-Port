@@ -48,4 +48,26 @@ for name, keys in (('g00_07', 'WW'), ('g00_09', 'WWAA')):
             mine = [d[o + i * 64: o + i * 64 + 64] for i in range(n)]; o += n * 64
             ok &= mine == vram[base:base + n]; base += n
         check('monster picture tiles = VRAM $9000', ok)
+# Bank 2 animations: the party row (OAM wC078 + OBJ tiles $6C-$7F) during the turn's messages,
+# and effect sprites (weapon grid, impact, death mask) that appear somewhere in an auto fight.
+p = os.path.join(dumps, 'g00_19.mem')
+if os.path.exists(p):
+    mem = open(p, 'rb').read()
+    v = os.path.join(tmp, 'row.bin')
+    run(['--battle', '80', '--keys', 'WWA' + 'AA' * 5 + 'W'], v)
+    d = open(v, 'rb').read(); o = 201
+    for g in range(3): o += 1 + d[o] * 64
+    oam, tiles = d[o:o + 160], d[o + 160:o + 160 + 4096]
+    check('party row OAM = real game', oam[0x78:0xa0] == mem[0xfe78:0xfea0], oam[0x78:0xa0].hex())
+    check('party row OBJ tiles = real VRAM', tiles[0x6c0:0x800] == mem[0x86c0:0x8800])
+    log = os.path.join(tmp, 'oam.bin')
+    subprocess.run([exe, rom, '--battle', '80', '--keys', 'WW*'], capture_output=True, env=dict(os.environ, FFL3_OAMLOG=log))
+    fr = open(log, 'rb').read()
+    eff = lambda o: tuple(sorted(tuple(o[i:i + 4]) for i in range(0, 0x78, 4) if o[i]))
+    seen = set(eff(fr[i:i + 160]) for i in range(0, len(fr), 160))
+    for n, what in ((62, 'weapon grid'), (47, 'impact'), (31, 'death mask')):
+        q = os.path.join(dumps, 'g00_%02d.mem' % n)
+        if os.path.exists(q):
+            r = eff(open(q, 'rb').read()[0xfe00:0xfea0])
+            check('anim %s sprites (g00_%02d) = real game' % (what, n), r in seen, str(r[:3]))
 sys.exit(1 if fails else 0)

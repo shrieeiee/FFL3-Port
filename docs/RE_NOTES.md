@@ -280,3 +280,48 @@ Game-side writers: map header byte 4 & $1F (1F = keep), event $1C/$1D, 00:10D7 (
 save + stop music, $36 encounter), 0B:4000 battle song = ((wCC5C >> 4) & 3) + 1, the battle
 bytecode writes hFFBC itself, 0B:6D63 receive ($35 / $3D for D8-E9 / $3B full), 00:1E7C $3A
 OK, 00:1E83 $3B error.
+
+## Battle animations (bank 2, 02:4000-52FF code, data from 02:5300)
+Entry points from the battle bytecode natives:
+- 0C:6B7F -> 02:4000 (c9bd bit 7 = has effect, id = c9bd & $7F -> wDE00; actor wC9D8 -> wDE01).
+  Enemy actor (>= 5): 02:4023 with 02:4101/4105 bob patterns around 02:41B1. Party actor:
+  bob table 02:40FA (y 58 5B 58 5A 58 59 58 57 56 55 54 55 56 57 58), neighbour swap 02:40A7,
+  then 02:4110 (party row set-up) when the target is a party member.
+- 0C:6B68 / 6B6C / 6B71 -> 02:4394: id wDE00 & $3F through table 02:4364 (24 entries):
+  0 43B1 1 43EA 2 43F8 3 439F 4 43C8 5 44B8 6 4437 7 463E 8 4697 9 458A A 47C6 B 48C6
+  C 45C9 D 45C0 E 4BA9 F 4BCD 10 4D65 11 4D45 12 4F20 13 4F3E 14 41A0 15 4109 16 4142 17 4167.
+  6B68 = id $11, 6B6C = id $10, 6B71 = current wDE00.
+- 0C:6001: copies tiles (wD00D ... -> VRAM $86C0).
+Party row: wDC80 (frame counter), wDC81, wDC82 = count, wDC83 + 8*i = two OAM entries
+(y, x, tile, attr) per member; y $58 (screen 72), x = 12 + 40*i for 4 members (02:4139 x table
+by wDDFF bit 0: 14 3C 64 8C / 10 50 70 90), tiles $6C + 2*i... (02:4154).
+Script effects (02:41B1): tiles = 02:658C + $200 * 02:651C[id] -> OBJ $8000 ($200 bytes); then
+script 02:53EE[id]: $FF end (-> 45AE clear), bit 7 = tile offset (a*2 -> wDE02), bit 6 = run
+effect id (02:4397), else frame: a = layout code (wait = ((a&7)+1)*4 frames, flags (a<<1)&$70),
+next byte = sprite grid index: 02:5A95[i] -> RLE ($80|n = n literal/repeat, $C0 = blanks)
+decoded into a 6x5 grid at wDE40 ($1F = empty), optional x-flip (430B) / y-flip (433B),
+drawn to OAM at the target position (02:42C0: enemy = wCC41/wCC51 slot rect, party = row).
+Real-game reference: prologue battle, attack = actor rises 4 px (2 frames/step), weapon grid,
+impact (tiles $64/$66), damage digits (OBJ $00-$02 reloaded) bouncing y 20-24, death = 4x4
+grid of OBJ $00 masks.
+
+Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co_await).
+- Vblank 00:3E26 (when wCBFF): wDC80 = (wDC80+1)&15; at 0 every member whose wDC81 bit is
+  clear swaps the tiles of his two OBJs and xors attr $20; then wDC82*8 bytes DC83 -> wC078.
+  02:4142 (id $16) clears it; bank 0B does the same before the command menus.
+- 0C:6001 = 0B:7DCA(a=2): member i's sprite page (bank 4, page<<8 | $40, 64 bytes) -> $86C0
+  + $40*i, 4 members if wD203 bit 7 else 5; if (rec+1 & $FC) | (rec+2 & $E0) the low bit
+  plane is cleared (0B:7E4F: grey silhouette).
+- Script tiles: $200 bytes from 02:658C + $20 * 02:651C[id]; 03:79C8 copies 03:79D4 -> $8200.
+- 02:42C0 enemy anchor: x = col + ((w-1)>>1) - 1, y = row + ((h-1)>>1) from wCC41 (col,row
+  per slot) / wCC51 ((w-1)<<4 | (h-1)); party: x = 5*i (4 members, a = 4) or 4*i (5, a = 0),
+  y = 7. Grid sprites at OAM (y*8 + 8*r, x*8 + 8*c).
+- Damage numbers: wD822 (13 words, $80xx none, $88xx miss, negative = heal) -> wDE40; digits
+  from 00:2009 (a=2) into wCD2B-CD31; glyphs 03:78F8 as 8x16 (blank top) at $8000 (03:78D6);
+  particles at wDF00 (30 x 8: age, life, motion ptr, y, x, tile, attr), motion 02:4E4B
+  (life $18, then dy,dx pairs); a number every 16 frames, monsters first if wD873 >= 5.
+- Raster split 02:441A: BGP / OBP0 = table value until LY 64, then $D2 (both).
+- Death style 0 (02:4FA4): mask OBJ tile 0 over the picture (rows of 8x16, Y-flipped on
+  alternate rows), patterns 02:52FE + 16k (k = 7..0) scrolled up a row 3 times each, then
+  02:52C1 fills the picture's BG rect with $FF. Styles 1-3 (02:5055 / 50ED / 5167) rewrite BG
+  tiles at $9000 and scroll - not translated yet.

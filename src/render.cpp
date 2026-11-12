@@ -257,37 +257,82 @@ static void putTile(Frame& out, const Tile& t, uint8_t pal, int sx, int sy, bool
 }
 
 void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out) {
+    (void)o;
     const int x0 = (out.w - 160) / 2;
     const BattleView v = b.view();
-    Tile blank;
-    for (size_t i = 0; i < 64; i++) blank[i] = tc.bg[0xff][i];
-    for (int ty = 0; ty < (out.h + 7) / 8; ty++)
-        for (int tx = -1; tx <= out.w / 8; tx++) putTile(out, blank, o.bgp, x0 + tx * 8, ty * 8, false);
+    if (v.blank) { std::fill(out.px.begin(), out.px.end(), uint8_t(0)); return; }
+    const int wy = std::min(v.wy, 144);
+    // Lines 0-63 can have their own palettes this frame (02:441A raster split).
+    auto bgPal = [&](int y) { return y < 64 ? v.topBgp : v.bgp; };
+    auto put = [&](int X, int Y, uint8_t pal, uint8_t c) {
+        if (X < 0 || Y < 0 || X >= out.w || Y >= out.h) return;
+        out.px[size_t(Y) * out.w + X] = uint8_t((pal >> (c * 2)) & 3);
+    };
+    // BG: blank tile $FF everywhere, the pictures in map rows 0-7, scrolled by SCX / SCY.
+    std::array<uint8_t, 256 * 64> pic;                 // colour index + 1 (0 = no picture)
+    pic.fill(0);
     for (int s : v.visibleSlots) {
         const EnemySlot& e = b.layout().slots[size_t(s)];
         const Monster& m = b.monsters()[size_t(e.group)];
         for (int r = 0; r < m.picH; r++)
             for (int c = 0; c < m.picW; c++) {
                 const int ti = m.cell[size_t(r * m.picW + c)];
-                if (ti >= 0) putTile(out, g.monster[size_t(e.group)][size_t(ti)], o.bgp, x0 + (e.col + c) * 8, (e.row + r) * 8, false);
+                if (ti < 0) continue;
+                const Tile& t = g.monster[size_t(e.group)][size_t(ti)];
+                for (int y = 0; y < 8; y++)
+                    for (int x = 0; x < 8; x++) {
+                        const int px = ((e.col + c) * 8 + x) & 255, py = (e.row + r) * 8 + y;
+                        if (py < 64) pic[size_t(py * 256 + px)] = uint8_t(t[size_t(y * 8 + x)] + 1);
+                    }
             }
     }
-    // OBJs that sit under the window line (the party row during messages) go first.
-    auto drawObj = [&](const BattleObj& ob) {
+    const Tile& blank = tc.bg[0xff];
+    for (int y = 0; y < out.h; y++) {
+        const int by = (y + v.scy) & 255;
+        for (int X = 0; X < out.w; X++) {
+            const int x = X - x0;
+            const int bx = (x + v.scx) & 255;
+            uint8_t c = blank[size_t((by & 7) * 8 + (bx & 7))];
+            if (y < wy && by < 64 && pic[size_t(by * 256 + bx)]) c = uint8_t(pic[size_t(by * 256 + bx)] - 1);
+            put(X, y, bgPal(y), c);
+        }
+    }
+    // the window
+    for (int y = wy; y < out.h; y += 8)
+        for (int c = 0; c < 20; c++) {
+            const int row = (y - wy) / 8;
+            if (row >= 10) break;
+            putTile(out, tc.bg[v.win[size_t(row * 20 + c)]], v.bgp, x0 + c * 8, y, false);
+        }
+    // OBJs from the OAM shadow (8x16; lower entries in front)
+    if (v.objTiles)
+        for (int i = 39; i >= 0; i--) {
+            const uint8_t* e = &v.oam[size_t(i * 4)];
+            const int sy = e[0] - 16, sx = e[1] - 8;
+            if (e[0] == 0 || e[0] >= 160 || e[1] == 0 || e[1] >= 168) continue;
+            const uint8_t attr = e[3];
+            const uint8_t* t = v.objTiles + (e[2] & 0xfe) * 16;
+            for (int y = 0; y < 16; y++) {
+                const int ty = (attr & 0x40) ? 15 - y : y;
+                const uint8_t lo = t[ty * 2], hi = t[ty * 2 + 1];
+                const int Y = sy + y;
+                const uint8_t pal = (attr & 0x10) ? v.obp1 : (Y < 64 ? v.topObp : v.obp0);
+                for (int x = 0; x < 8; x++) {
+                    const int bit = (attr & 0x20) ? x : 7 - x;
+                    const uint8_t c = uint8_t(((lo >> bit) & 1) | (((hi >> bit) & 1) << 1));
+                    if (c) put(x0 + sx + x, Y, pal, c);
+                }
+            }
+        }
+    // the menus' own sprites (cursor, brackets, status-panel portraits)
+    for (const BattleObj& ob : v.objs) {
         if (ob.member >= 0) {
             const auto& t = g.member[size_t(ob.member)];
-            for (int k = 0; k < 4; k++) putTile(out, t[size_t(k)], o.obp, x0 + ob.x + (k >> 1) * 8, ob.y + (k & 1) * 8, true);
+            for (int k = 0; k < 4; k++) putTile(out, t[size_t(k)], v.obp0, x0 + ob.x + (k >> 1) * 8, ob.y + (k & 1) * 8, true);
         } else {
-            putTile(out, ob.tile == Battle::kCursor ? g.cursor : g.bracket, o.obp, x0 + ob.x, ob.y, true, ob.flipX, ob.flipY);
+            putTile(out, ob.tile == Battle::kCursor ? g.cursor : g.bracket, v.obp0, x0 + ob.x, ob.y, true, ob.flipX, ob.flipY);
         }
-    };
-    for (int y = v.wy; y < out.h; y += 8)
-        for (int c = 0; c < 20; c++) {
-            const int row = (y - v.wy) / 8;
-            if (row >= 10) break;
-            putTile(out, tc.bg[v.win[size_t(row * 20 + c)]], o.bgp, x0 + c * 8, y, false);
-        }
-    for (const BattleObj& ob : v.objs) drawObj(ob);
+    }
 }
 
 } // namespace ffl3

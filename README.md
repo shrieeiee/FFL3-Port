@@ -55,8 +55,7 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Talent / Magic / Item: lists, usability, MP checks and target cursor rules from the
   original menu code (one ally / whole party / one enemy / an enemy group).
 - Not yet: the real "Auto set" mode (Auto = everyone attacks), what happens after a wipe
-  (the port goes back to the start), battle animations (short pauses instead), MP cost
-  shown in the Magic list.
+  (the port goes back to the start), MP cost shown in the Magic list.
 
 **Milestone 7 – the rest of the game loop** ✅
 - Chests (item from 03:762A, "Received X." / "Empty", opened chests stay open)
@@ -121,13 +120,25 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   A held = fast); scripts wait for a battle / shop an event opens; scripted walks no longer
   set off step events or random battles; event $18 sets its story flag (0F:7C74).
 
-Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, battle
-animations, animated water tiles. The last prologue walk on the Talon's map is placed at the
+**Milestone 11 – battle animations** (in progress)
+- The bank 2 animation engine translated to C++20 coroutines (`src/battleanim.cpp`) working on
+  the battle's own memory image - OAM shadow, OBJ tile RAM, scroll and palette registers - so
+  the battle waits on them exactly where the GB does. The renderer draws that OBJ layer (8x16),
+  SCX / SCY and the line-64 palette split.
+- Done: the party row (walking on the spot, members stepping forward, status silhouettes), the
+  sprite-grid scripts over monsters (weapons, claws, impacts), shake, flashes, fades, the LCD
+  blink, damage numbers / "Miss" bouncing as particles, the monster death dissolve. Checked
+  against emulator OAM / VRAM dumps (`tests/test_battle.py`).
+- Not yet: the spell raster / particle effects (ids 5-D), the other three death styles
+  (drawn with the first), effects $0F / $13 / $14. A short flash stands in for them.
+
+Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, the rest of
+the battle animations (above), animated water tiles. The last prologue walk on the Talon's map is placed at the
 game's hand-over spot rather than walked exactly.
 
 ## Building
 
-Needs CMake 3.16+ and a C++17 compiler. SDL2 is picked up from the system, or from
+Needs CMake 3.16+ and a C++20 compiler (coroutines: GCC 10+, Clang 14+, MSVC 2019 16.8+). SDL2 is picked up from the system, or from
 `third_party/SDL2`, or fetched automatically.
 
 ```sh

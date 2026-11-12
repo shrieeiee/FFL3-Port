@@ -499,6 +499,15 @@ int main(int argc, char** argv) {
             if (!battle || battle->finished()) return;
             battle->tick(in);
             if (++frameNo == shotAt && !shot.empty()) snap();
+            if (const char* d = std::getenv("FFL3_OAMLOG")) {   // debug / tests: each frame's OAM
+                static FILE* lf = std::fopen(d, "wb");
+                if (lf) { const BattleView v = battle->view(); std::fwrite(v.oam.data(), 1, 160, lf); std::fflush(lf); }
+            }
+            if (const char* d = std::getenv("FFL3_FRAMES")) {   // debug: every frame to DIR/fNNNNN.bmp
+                const std::string keep = shot;
+                char nm[64]; std::snprintf(nm, sizeof nm, "/f%05d.bmp", frameNo);
+                shot = std::string(d) + nm; snap(); shot = keep; shotDone = false;
+            }
         };
         const Battle& B = *battle;
         std::printf("formation %02X: ", B.formation().index);
@@ -543,6 +552,8 @@ int main(int argc, char** argv) {
                 std::fputc(int(t.size()), f);
                 for (const Tile& x : t) std::fwrite(x.data(), 1, 64, f);
             }
+            std::fwrite(v.oam.data(), 1, v.oam.size(), f);   // then the OAM and OBJ tiles $8000-$8FFF
+            std::fwrite(v.objTiles, 1, 0x1000, f);
             std::fclose(f);
         }
         for (uint16_t n : B.unknownNatives) std::printf("unhandled native %04X\n", n);

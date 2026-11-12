@@ -10,6 +10,7 @@
 #pragma once
 #include "battledata.h"
 #include "battlevm.h"
+#include "battleanim.h"
 #include <deque>
 #include <string>
 
@@ -43,8 +44,13 @@ struct BattleView {
     int wy = 144;                            // window top (144 = hidden)
     std::array<uint8_t, 20 * 10> win{};      // window tiles, 20 x 10
     std::vector<BattleObj> objs;
-    std::vector<int> visibleSlots;           // enemy slots to draw (alive)
+    std::vector<int> visibleSlots;           // enemy slots whose picture is on the BG
     int flashSlot = -1;
+    // The GB's OBJ layer and scroll / palette registers as the bank 2 animations left them.
+    std::array<uint8_t, 160> oam{};          // 40 entries (y, x, tile, attr), 8x16
+    const uint8_t* objTiles = nullptr;       // OBJ tile data ($8000-$8FFF)
+    uint8_t scx = 0, scy = 0, bgp = 0xd2, obp0 = 0xd0, obp1 = 0x90, topBgp = 0xd2, topObp = 0xd0;
+    bool blank = false;
 };
 
 class Battle {
@@ -101,6 +107,10 @@ private:
     BattleRam& ram_;
     std::vector<CharRecord>& party_;
     BattleVM vm_;
+    BattleAnim anim_;
+    std::array<bool, 8> erased_{};           // the slot's picture has been cleared from the BG
+    bool startAnim(uint16_t entry);          // true: finished at once
+    void hidePartyRow();
     Formation form_;
     EnemyLayout layout_;
     std::vector<Monster> groups_;
