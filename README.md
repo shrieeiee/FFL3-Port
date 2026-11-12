@@ -94,6 +94,9 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   Engine, Weapon and Option (Warp not yet); parts in the bag get attached with their story
   flags; take-off mode from flags $39/$3A and the engine (01:63E6); flying (modes 6-8 go
   anywhere), B lands back in the cockpit, A on the parking spot goes aboard.
+- Shops and inns redone with the game's own screens and texts, pixel-identical to the real
+  thing apart from the party's walk animation: Exit / Buy / Sell / Mix, Yes / No boxes,
+  both kinds of Mix (Light + Dark stones for gear; two elements for a spell), inns $40-$4F.
 - Townsfolk wander (01:4F66 / 5060): move types 0-3 and $1B-$1E take a random step about
   once a second at half walking speed, blocked by walls, event blocks and people.
 - Map event blocks: damage floors ($20), status-cure ($21) and healing ($22) spots, the

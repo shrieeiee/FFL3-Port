@@ -4,6 +4,7 @@
 // re-run the game's own recompute (0B:7349 / 0B:728B) on the record.
 #pragma once
 #include "battle.h"
+#include "uitext.h"
 #include <functional>
 
 namespace ffl3 {
@@ -18,6 +19,7 @@ public:
     std::array<uint8_t, 20 * 18> screen() const;
     int cursorRow() const;
     int cursorCol() const;
+    std::vector<UiSprite> sprites() const { return {}; }
     std::function<void(int id)> playSfx;
 
 private:

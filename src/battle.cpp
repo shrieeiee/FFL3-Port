@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include "battle.h"
+#include "uitext.h"
 #include "battlenatives.h"
 #include <algorithm>
 #include <cstdio>
@@ -149,7 +150,9 @@ std::vector<int> Battle::aliveGroups() const {
     return v;
 }
 
-int Battle::memberSprite(int i) const { return kSpritePage[std::min(i, 9)]; }
+int Battle::memberSprite(int i) const {
+    return i < int(party_.size()) ? spritePage(rom_, party_[size_t(i)]) : kSpritePage[0];
+}
 
 // 00:20DE: party 0-4 (name at record +7, 6 chars) or combatant $80+k (monster, +5, 8 chars)
 Glyphs Battle::combatantName(int a) const {

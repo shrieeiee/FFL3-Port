@@ -1,5 +1,6 @@
 #include "render.h"
 #include "console.h"
+#include "uitext.h"
 
 namespace ffl3 {
 
@@ -139,21 +140,6 @@ void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, 
     }
 }
 
-void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Frame& out) {
-    const int x0 = (out.w - 160) / 2;
-    const auto s = shop.screen();
-    for (int r = 0; r < 18; r++)
-        for (int c = 0; c < 20; c++)
-            if (s[size_t(r * 20 + c)]) drawBgTile(tc, o.bgp, out, x0 + c * 8, r * 8, s[size_t(r * 20 + c)]);
-    const int cr = shop.cursorRow();
-    if (cr >= 0) {
-        const auto& t = tc.obj[0x7e];
-        for (int y = 0; y < 8; y++)
-            for (int x = 0; x < 8; x++)
-                if (t[size_t(y * 8 + x)]) out.px[size_t(cr * 8 + y) * size_t(out.w) + size_t(x0 + 8 * shop.cursorCol() - 8 + x)] = uint8_t((o.obp >> (t[size_t(y * 8 + x)] * 2)) & 3);
-    }
-}
-
 template <class T>
 static void renderOverlay(const T& w, const TileCache& tc, const RenderOpts& o, Frame& out) {
     const int x0 = (out.w - 160) / 2;
@@ -161,6 +147,16 @@ static void renderOverlay(const T& w, const TileCache& tc, const RenderOpts& o, 
     for (int r = 0; r < 18; r++)
         for (int c = 0; c < 20; c++)
             if (s[size_t(r * 20 + c)]) drawBgTile(tc, o.bgp, out, x0 + c * 8, r * 8, s[size_t(r * 20 + c)]);
+    for (const UiSprite& sp : w.sprites())
+        for (int k = 0; k < 4; k++) {
+            const auto& t = sp.tiles[size_t(k)];
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++) {
+                    const int X = x0 + sp.x + (k >> 1) * 8 + x, Y = sp.y + (k & 1) * 8 + y;
+                    if (t[size_t(y * 8 + x)] && X >= 0 && X < out.w && Y >= 0 && Y < out.h)
+                        out.px[size_t(Y) * size_t(out.w) + size_t(X)] = uint8_t((o.obp >> (t[size_t(y * 8 + x)] * 2)) & 3);
+                }
+        }
     const int cr = w.cursorRow();
     if (cr < 0) return;
     const auto& t = tc.obj[0x7e];
@@ -169,6 +165,7 @@ static void renderOverlay(const T& w, const TileCache& tc, const RenderOpts& o, 
         for (int x = 0; x < 8; x++)
             if (t[size_t(y * 8 + x)]) out.px[size_t(cr * 8 + y) * size_t(out.w) + size_t(cx + x)] = uint8_t((o.obp >> (t[size_t(y * 8 + x)] * 2)) & 3);
 }
+void renderShop(const Shop& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
 void renderMenu(const FieldMenu& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
 void renderConsole(const TalonConsole& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
 

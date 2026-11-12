@@ -4,6 +4,7 @@
 // taken from the bag, remembered in wC6F8/wC6F9, with story flags 01:7C70 for $D8-$E0.
 #pragma once
 #include "battle.h"
+#include "uitext.h"
 #include "flags.h"
 #include <functional>
 #include <string>
@@ -22,6 +23,7 @@ public:
     std::array<uint8_t, 20 * 18> screen() const;
     int cursorRow() const;
     int cursorCol() const;
+    std::vector<UiSprite> sprites() const { return {}; }
     std::function<void(int id)> playSfx;
 
 private:

@@ -113,6 +113,7 @@ int main(int argc, char** argv) {
     std::string wavKind;
     int partyHp = -1;
     bool wanderOpt = false;
+    int shopOpt = -1;
     std::vector<int> setFlags;
     int wavId = 0;
     double wavSecs = 0;
@@ -138,6 +139,7 @@ int main(int argc, char** argv) {
         else if (a == "--debug") debug = true;
         else if (a == "--mute") mute = true;
         else if (a == "--wander") wanderOpt = true;
+        else if (a == "--shop" && i + 1 < argc) shopOpt = int(std::strtol(argv[++i], nullptr, 16));   // test: open shop
         else if (a == "--flag" && i + 1 < argc) setFlags.push_back(int(std::strtol(argv[++i], nullptr, 16)));   // test: set event flag
         else if (a == "--wav" && i + 3 < argc) {      // --wav music|sfx ID SECONDS (writes ffl3.wav)
             wavKind = argv[++i]; wavId = int(std::strtol(argv[++i], nullptr, 16)); wavSecs = std::atof(argv[++i]);
@@ -526,6 +528,7 @@ int main(int argc, char** argv) {
     if (!dumpTiles.empty() || !shot.empty() || !walk.empty() || !savePath.empty()) {
         if (partyHp >= 0) for (auto& r : party) r.setHp(partyHp);
         field.wander = wanderOpt;
+        if (shopOpt >= 0) openShop(shopOpt);
         if (!dumpTiles.empty()) {
             FILE* f = std::fopen(dumpTiles.c_str(), "wb");
             if (!f) return 1;
@@ -553,6 +556,7 @@ int main(int argc, char** argv) {
             if (shop) {                                 // A / B / U / D drive an open shop
                 ShopInput in;
                 in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
+                in.left = c == 'L'; in.right = c == 'R';
                 shop->tick(in);
                 if (shop->done()) shop.reset();
                 continue;
@@ -705,6 +709,7 @@ int main(int argc, char** argv) {
             } else if (shop) {
                 ShopInput in;
                 in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
+                in.left = left && !leftPrev; in.right = right && !rightPrev;
                 shop->tick(in);
                 if (shop->done()) shop.reset();
             } else if (battle) {
