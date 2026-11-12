@@ -63,7 +63,7 @@ Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, c
     : rom_(rom), ram_(ram), party_(party), vm_(rom), anim_(rom, vm_.mem) {
     vm_.mem = ram_;
     anim_.random = [this](uint8_t n) { return rnd(n); };
-    anim_.eraseEnemy = [this](int s) { if (s >= 0 && s < 8) erased_[size_t(s)] = true; };
+    anim_.sfx = [this](int id) { if (playSfx) playSfx(id); };
     vm_.mem[0xff90] = uint8_t(seed);
     vm_.mem[0xff93] = uint8_t(seed >> 8);
     ctx_ = ctx;
@@ -135,8 +135,8 @@ void Battle::setup(int hffca, const BattleContext& ctx, bool retry) {
         M[0xcc41 + k * 2] = uint8_t(e.col);
         M[0xcc42 + k * 2] = uint8_t(e.row);
         M[0xcc51 + k] = uint8_t((mo.picW - 1) << 4 | (mo.picH - 1));
-        erased_[k] = false;
     }
+    buildBg();
     M[0xff40] = 0xe7; M[0xff42] = M[0xff43] = 0;
     M[0xff47] = 0xd2; M[0xff48] = 0xd0; M[0xff49] = 0x90;
     M[0xcbff] = 0;
@@ -240,6 +240,8 @@ bool Battle::native(uint16_t addr) {
 }
 
 bool Battle::startAnim(uint16_t entry) {
+    if (const char* fx = std::getenv("FFL3_FORCEFX"); fx && entry == 0x4000)   // debug: try a script
+        vm_.mem[0xc9bd] = uint8_t(0x80 | std::strtol(fx, nullptr, 16));
     if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9bd=%02X actor=%02X target=%02X\n", entry, m(0xde00), m(0xc9bd), m(0xc9d8), m(0xc9d6));
     anim_.start(entry);
     if (!anim_.busy()) return true;
@@ -253,8 +255,47 @@ void Battle::hidePartyRow() {
     for (int i = 0; i < 40; i++) vm_.mem[size_t(0xdc83 + i)] = 0;
     vm_.mem[0xcbff] = 0;
     for (int i = 0; i < 0xa0; i++) vm_.mem[size_t(0xc000 + i)] = 0;
-    for (size_t s = 0; s < layout_.slots.size() && s < 8; s++)
-        if (!enemyAlive(int(s))) erased_[s] = true;    // gone without an animation
+    for (size_t s = 0; s < layout_.slots.size() && s < 8; s++) {
+        if (enemyAlive(int(s))) continue;              // gone without an animation: clear it
+        const EnemySlot& e = layout_.slots[s];
+        const Monster& mo = groups_[size_t(e.group)];
+        for (int r = 0; r < mo.picH; r++)
+            for (int c = 0; c < mo.picW; c++) vm_.mem[size_t(0x9800 + (e.row + r) * 32 + e.col + c)] = 0xff;
+    }
+}
+
+// The monster pictures: each group's tiles in turn from $9000 (signed tile numbers), the map
+// at $9800 with $FF (blank) everywhere else - what the real game has in VRAM.
+void Battle::buildBg() {
+    auto& M = vm_.mem;
+    std::fill(M.begin() + 0x9800, M.begin() + 0x9c00, uint8_t(0xff));
+    int base[3] = {0, 0, 0}, n = 0;
+    for (int g = 0; g < 3; g++) {
+        base[g] = n;
+        for (const Tile& t : groups_[size_t(g)].tiles) {
+            if (n >= 128) break;
+            for (int y = 0; y < 8; y++) {
+                uint8_t lo = 0, hi = 0;
+                for (int x = 0; x < 8; x++) {
+                    const uint8_t c = t[size_t(y * 8 + x)];
+                    lo = uint8_t(lo | (c & 1) << (7 - x));
+                    hi = uint8_t(hi | (c >> 1 & 1) << (7 - x));
+                }
+                M[size_t(0x9000 + n * 16 + y * 2)] = lo;
+                M[size_t(0x9000 + n * 16 + y * 2 + 1)] = hi;
+            }
+            n++;
+        }
+    }
+    for (const EnemySlot& e : layout_.slots) {
+        const Monster& mo = groups_[size_t(e.group)];
+        for (int r = 0; r < mo.picH; r++)
+            for (int c = 0; c < mo.picW; c++) {
+                const int ti = mo.cell[size_t(r * mo.picW + c)];
+                if (ti >= 0 && e.row + r < 32 && e.col + c < 32)
+                    M[size_t(0x9800 + (e.row + r) * 32 + e.col + c)] = uint8_t(std::min(base[e.group] + ti, 127));
+            }
+    }
 }
 
 // Decode the bank 9 battle text at wCE8D/8E into pending glyphs.
@@ -623,13 +664,13 @@ void Battle::statusPanel(BattleView& v, int hideCol) const {
 BattleView Battle::view() const {
     BattleView v;
     v.win.fill(0xff);
-    for (size_t s = 0; s < layout_.slots.size(); s++)
-        if (s >= 8 || !erased_[s]) v.visibleSlots.push_back(int(s));
     v.oam = anim_.oam();
-    v.objTiles = &vm_.mem[0x8000];
-    v.scx = m(0xff43); v.scy = m(0xff42);
-    v.bgp = m(0xff47); v.obp0 = m(0xff48); v.obp1 = m(0xff49);
-    v.topBgp = anim_.topBgp; v.topObp = anim_.topObp;
+    v.vram = &vm_.mem[0x8000];
+    for (int y = 0; y < 144; y++) {
+        v.scx[size_t(y)] = anim_.reg(y, 0xff43); v.scy[size_t(y)] = anim_.reg(y, 0xff42);
+        v.bgp[size_t(y)] = anim_.reg(y, 0xff47); v.obp0[size_t(y)] = anim_.reg(y, 0xff48);
+        v.obp1[size_t(y)] = anim_.reg(y, 0xff49);
+    }
     v.blank = anim_.blank;
     auto brackets = [&v](int x0, int y0, int x1, int y1) {
         v.objs.push_back({x0, y0, kBracket, false, false});

@@ -44,12 +44,13 @@ struct BattleView {
     int wy = 144;                            // window top (144 = hidden)
     std::array<uint8_t, 20 * 10> win{};      // window tiles, 20 x 10
     std::vector<BattleObj> objs;
-    std::vector<int> visibleSlots;           // enemy slots whose picture is on the BG
     int flashSlot = -1;
-    // The GB's OBJ layer and scroll / palette registers as the bank 2 animations left them.
+    // The GB's video state as the battle code and the bank 2 animations left it: BG map $9800
+    // and tiles ($9000 signed, the font above 127), the OBJ layer, and the scroll / palette
+    // registers line by line.
     std::array<uint8_t, 160> oam{};          // 40 entries (y, x, tile, attr), 8x16
-    const uint8_t* objTiles = nullptr;       // OBJ tile data ($8000-$8FFF)
-    uint8_t scx = 0, scy = 0, bgp = 0xd2, obp0 = 0xd0, obp1 = 0x90, topBgp = 0xd2, topObp = 0xd0;
+    const uint8_t* vram = nullptr;           // $8000-$9FFF
+    std::array<uint8_t, 144> scx{}, scy{}, bgp{}, obp0{}, obp1{};
     bool blank = false;
 };
 
@@ -108,7 +109,7 @@ private:
     std::vector<CharRecord>& party_;
     BattleVM vm_;
     BattleAnim anim_;
-    std::array<bool, 8> erased_{};           // the slot's picture has been cleared from the BG
+    void buildBg();                          // pictures into $9000 / $9800 as bank 0B does
     bool startAnim(uint16_t entry);          // true: finished at once
     void hidePartyRow();
     Formation form_;

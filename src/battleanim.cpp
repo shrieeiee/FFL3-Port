@@ -32,11 +32,32 @@ void BattleAnim::frame() {
     vblank();
     blank = blankNext_;
     blankNext_ = false;
-    topBgp = mem_[kBGP];
-    topObp = mem_[kOBP0];
+    writes_.clear();
+    based_ = false;
     if (!busy()) return;
     if (wait_ > 0 && --wait_ > 0) return;
     cur_.resume();
+}
+
+void BattleAnim::atLine(int line, uint16_t r, uint8_t v) {
+    if (!based_) {
+        for (int i = 0; i < 12; i++) base_[size_t(i)] = mem_[uint16_t(0xff40 + i)];
+        based_ = true;
+    }
+    writes_.push_back({line, r, v});
+    mem_[r] = v;
+}
+
+uint8_t BattleAnim::reg(int line, uint16_t r) const {
+    if (!based_) return mem_[r];
+    uint8_t v = base_[size_t(r - 0xff40)];
+    for (const LineWrite& w : writes_)
+        if (w.r == r && w.line <= line) v = w.v;
+    return v;
+}
+
+void BattleAnim::copy(uint16_t src, uint16_t dst, int n) {
+    for (int i = 0; i < n; i++) mem_[uint16_t(dst + i)] = mem_[uint16_t(src + i)];
 }
 
 // 00:3E26 (vblank): every 16 frames each member who can act swaps the halves of his sprite and
@@ -309,8 +330,9 @@ AnimTask BattleAnim::lcdBlink() {                      // 02:43C8: LCD off / on 
 // 02:441A: next frame, lines 0-63 (the monsters) in palette `pal`, BG and OBJ 0.
 AnimTask BattleAnim::flashTop(uint8_t pal) {
     co_await wait(1);
-    topBgp = topObp = pal;
-    mem_[kBGP] = mem_[kOBP0] = 0xd2;
+    mem_[kBGP] = mem_[kOBP0] = pal;
+    atLine(64, kBGP, 0xd2);
+    atLine(64, kOBP0, 0xd2);
 }
 
 AnimTask BattleAnim::fade(uint16_t table) {            // 02:440B: 3 palettes, 7 frames each
@@ -337,7 +359,8 @@ AnimTask BattleAnim::vanishReturn() {                  // 02:43F8: ... and back
 AnimTask BattleAnim::bgFlash() {                       // 02:4BA9: BG palette cycle on the monsters
     for (int e = 0x30; e > 0; e--) {
         co_await wait(1);
-        topBgp = rb(uint16_t(0x4bc9 + ((e & 0x0c) >> 2)));
+        mem_[kBGP] = rb(uint16_t(0x4bc9 + ((e & 0x0c) >> 2)));
+        atLine(64, kBGP, 0xd2);
     }
 }
 
@@ -486,8 +509,11 @@ AnimTask BattleAnim::death() {
     mem_[0xde18] = uint8_t((v & 15) + 1);
     mem_[0xde19] = mem_[uint16_t(0xcc41 + s * 2)];
     mem_[0xde1a] = mem_[uint16_t(0xcc42 + s * 2)];
-    const int style = mem_[0xcc5c] & 3;
-    if (style != 0 && std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM death style %d (drawn as style 0)\n", style);
+    int style = mem_[0xcc5c] & 3;
+    if (const char* ds = std::getenv("FFL3_DEATHSTYLE")) style = std::atoi(ds) & 3;   // debug
+    if (style == 1) { co_await death1(); co_return; }
+    if (style == 3) { co_await death3(); co_return; }
+    if (style == 2 && std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM death style 2 (drawn as style 0)\n");
     for (int i = 0; i < 32; i++) mem_[uint16_t(0x8000 + i)] = 0;
     // 02:4FD0: the mask sprites
     {
@@ -520,8 +546,281 @@ AnimTask BattleAnim::death() {
             upload();
         }
     }
-    if (eraseEnemy) eraseEnemy(s);                     // 02:52C1
+    clearRect();
     clearOam();
+}
+
+void BattleAnim::clearRect() {                         // 02:52C1 (02:52DD: $9800 + col + row*32)
+    const int w = mem_[0xde17], h = mem_[0xde18];
+    uint16_t hl = uint16_t(0x9800 + mem_[0xde19] + mem_[0xde1a] * 32);
+    for (int r = 0; r < h; r++, hl = uint16_t(hl + 32))
+        for (int c = 0; c < w; c++) mem_[uint16_t(hl + c)] = 0xff;
+    if (eraseEnemy) eraseEnemy(mem_[0xde01]);
+}
+
+// 02:447F: wait a frame, then register r on lines 0..lines-1 from wDE40, back to 0 after.
+void BattleAnim::rasterTable(uint16_t r, int lines) {
+    for (int l = 0; l < lines; l++) atLine(l, r, mem_[uint16_t(0xde40 + l)]);
+    atLine(lines, r, 0);
+}
+
+// 02:5055 (death style 1): the picture drops out in horizontal lines, SCY $40 per line.
+AnimTask BattleAnim::death1() {
+    for (int i = 0; i < 0x40; i++) mem_[uint16_t(0xde40 + i)] = 0;
+    auto mirror = [&] {                                // 02:50C4
+        copy(0xde40, 0xde48, 8); copy(0xde40, 0xde60, 16);
+        copy(0xde50, 0xde58, 8); copy(0xde50, 0xde70, 16);
+    };
+    for (int k = 8; k > 0; k--) {
+        co_await wait(1);                              // 02:5077
+        rasterTable(kSCY, 65);
+        uint8_t c = rb(uint16_t(0x5098 + k - 1));
+        for (int b = 0; b < 8; b++, c >>= 1) {
+            const uint8_t a = (c & 1) ? 0x40 : 0;
+            mem_[uint16_t(0xde40 + b)] = a;
+            mem_[uint16_t(0xde57 - b)] = a;
+        }
+        mirror();
+        for (int t = 0; t < 3; t++) {                  // 02:50A6, three times
+            co_await wait(1);
+            rasterTable(kSCY, 65);
+            const uint8_t a48 = mem_[0xde48], a5f = mem_[0xde5f];
+            copy(0xde49, 0xde40, 7);
+            mem_[0xde47] = a48;
+            mem_[0xde50] = a5f;
+            copy(0xde58, 0xde51, 7);
+            mirror();
+        }
+    }
+    for (int i = 0; i < 0x100; i++) mem_[uint16_t(0x9800 + i)] = 0xff;   // 02:51B6
+    if (eraseEnemy) eraseEnemy(-1);
+    co_await wait(1);
+    mem_[kSCX] = mem_[kSCY] = 0;
+}
+
+// 02:51DE: 8 frames of BGP = table[wDE11 - 1] on lines 0-89.
+AnimTask BattleAnim::flashLines(uint16_t table, int idx) {
+    const uint8_t b = rb(uint16_t(table + idx - 1));
+    for (int c = 0; c < 8; c++) {
+        co_await wait(1);
+        mem_[kBGP] = b;
+        atLine(0x5a, kBGP, 0xd2);
+    }
+}
+
+// 02:5167 (death style 3, the bosses): the picture bounces down, flashes, then melts tile
+// by tile (each frame every tile slides down a row through a noise mask), fades and goes.
+AnimTask BattleAnim::death3() {
+    uint8_t b = 0, last = 0;
+    do {
+        sound(0x30);
+        for (int c = 5; c > 0; c--) {
+            co_await wait(2);
+            last = uint8_t(rb(uint16_t(0x51ca + c)) + b);
+            mem_[kSCY] = last;
+        }
+        b--;
+    } while (last != 0xf8);
+    for (int k = 0x0c; k > 0; k--) co_await flashLines(0x51d1, k);
+    for (int f = 0x20; f > 0; f--) {                   // 02:51FD
+        mem_[0xde0f] = uint8_t(f);
+        if (f >= 6 && !(f & 1)) sound(0x36);
+        co_await wait(1);
+        for (int t = 0; t < 0x5a; t++) {
+            const uint16_t tile = uint16_t(0x9000 + t * 16);
+            copy(tile, 0xde80, 16);
+            mem_[0xde90] = (f >= 0x2e || !(f & 1)) ? 0 : rnd(0xff);
+            mem_[0xde91] = rnd(0xff);
+            copy(0xde80, 0xde92, 14);
+            for (int r = 0; r < 8; r++)
+                mem_[uint16_t(0xdea0 + r)] = uint8_t(~mem_[uint16_t(0xde80 + r * 2)] | mem_[uint16_t(0xde81 + r * 2)]);
+            for (int r = 0; r < 8; r++) {
+                const uint8_t c = mem_[uint16_t(0xdea0 + r)];
+                uint8_t& lo = mem_[uint16_t(0xde90 + r * 2)];
+                uint8_t& hi = mem_[uint16_t(0xde91 + r * 2)];
+                lo = uint8_t(~(~lo & c));
+                hi = uint8_t(hi & c);
+            }
+            copy(0xde90, tile, 16);
+        }
+        mem_[kSCY] = mem_[kSCY] == 0xf8 ? 0xf7 : 0xf8;  // the LY-timed jitter, once a frame
+    }
+    for (int k = 4; k > 0; k--) co_await flashLines(0x4433, k);
+    for (int i = 0; i < 0x100; i++) mem_[uint16_t(0x9800 + i)] = 0xff;
+    if (eraseEnemy) eraseEnemy(-1);
+    co_await wait(1);
+    mem_[kSCX] = mem_[kSCY] = 0;
+}
+
+// ---- spells ----
+
+// 02:4757: a group of particles: n, then per particle (row<<5 | col) and (attr | tile/2),
+// placed at (yb + row*8, xb + col*8) - only if there are enough free slots.
+bool BattleAnim::spawnGroup(uint16_t motion, uint16_t group, uint8_t xb, uint8_t yb) {
+    const int n = rb(group++);
+    int free = 0;
+    for (int i = 0; i < 30; i++) if (mem_[uint16_t(0xdf00 + i * 8)] == 0xff) free++;
+    if (n >= free + 1) return false;
+    for (int i = 0; i < n; i++) {
+        const uint8_t p = rb(group++), t = rb(group++);
+        mem_[0xde13] = uint8_t(((p >> 5) & 7) * 8 + yb);
+        mem_[0xde14] = uint8_t((p & 0x1f) * 8 + xb);
+        mem_[0xde15] = uint8_t((t & 0x0f) * 2);
+        mem_[0xde16] = t & 0xf0;
+        particleAdd(motion);
+    }
+    return true;
+}
+
+// 02:44B8 (effect 5): sparks appear at random and are pulled into the middle of the monsters.
+AnimTask BattleAnim::converge() {
+    particlesInit(3);
+    mem_[0xdeff] = 0x0e;
+    bool more;
+    for (int k = 0x0e; k > 0; k--) {
+        bool spawn = true;                             // 02:4568: make room at wDF00
+        if (mem_[0xdf00] != 0xff) {
+            spawn = false;
+            for (int i = 1; i < 30; i++) {
+                const uint16_t e = uint16_t(0xdf00 + i * 8);
+                if (mem_[e] == 0xff) { copy(0xdf00, e, 8); spawn = true; break; }
+            }
+        }
+        if (spawn) {
+            const uint8_t e[8] = {0, 0x0a, 0x3c, 0x46, uint8_t(rnd(0x0a) * 8), uint8_t(rnd(0x16) * 8), 0, 0};
+            for (int i = 0; i < 8; i++) mem_[uint16_t(0xdf00 + i)] = e[i];
+        }
+        co_await particlesFrame(more);
+        for (int i = 0; i < 30; i++) {                 // 02:4500
+            const uint16_t e = uint16_t(0xdf00 + i * 8);
+            if (mem_[e] == 0xff) continue;
+            auto pull = [&](uint16_t a, uint8_t target) {
+                const uint8_t v = mem_[a];
+                const uint8_t d = uint8_t((v < target ? target - v : v - target) >> 2);
+                mem_[a] = v < target ? uint8_t(v + d) : uint8_t(v - d);
+                return d;
+            };
+            const uint8_t d = pull(uint16_t(e + 4), 0x28);
+            const uint8_t bb = pull(uint16_t(e + 5), 0x54);
+            const int a = uint8_t(bb + d);
+            if (a < 4) { mem_[e] = 0xff; continue; }
+            mem_[uint16_t(e + 6)] = a < 8 ? 2 : 0;
+            mem_[uint16_t(e + 7)] = 0;
+        }
+        co_await particlesFrame(more);
+    }
+}
+
+// 02:4437 (effect 6): the monsters ripple - SCX per line from a rotating table.
+AnimTask BattleAnim::wave() {
+    uint16_t hl = 0xde40;                              // 02:4498
+    for (int c = 0; c < 4; c++)
+        for (int b = 0; b < 8; b++) {
+            const uint8_t a = rb(uint16_t(0x44b0 + b));
+            mem_[hl++] = a;
+            mem_[hl++] = uint8_t(-a);
+        }
+    for (int phase = 0; phase < 2; phase++)
+        for (int n = phase ? 0x60 : 0x40; n > 0; n--) {
+            const uint8_t c = mem_[0xde40];
+            copy(0xde41, 0xde40, 0x3f);
+            mem_[0xde7f] = phase ? uint8_t(c << 1) : c;
+            co_await wait(1);
+            rasterTable(kSCX, 65);
+        }
+}
+
+// The particle spells: patterns of sprites from the script's tiles falling / scattering.
+AnimTask BattleAnim::rain(int id) {
+    bool more = true;
+    switch (id) {
+    case 7:                                            // 02:463E
+        particlesInit(2);
+        for (int k = 0x10; k > 0; k--) {
+            const uint8_t a = uint8_t(k - 1);
+            spawnGroup(0x463b, 0x466d, rb(uint16_t(0x465d + (a & 15))), 0x08);
+            spawnGroup(0x463b, 0x4682, rb(uint16_t(0x465d + ((a + 8) & 15))), 0x28);
+            co_await particlesFrame(more);
+            spawnGroup(0x463b, 0x4682, rb(uint16_t(0x465d + (a & 15))), 0x08);
+            spawnGroup(0x463b, 0x466d, rb(uint16_t(0x465d + ((a + 8) & 15))), 0x28);
+            co_await particlesFrame(more);
+        }
+        break;
+    case 8:                                            // 02:4697
+        particlesInit(1);
+        for (;;) {
+            spawnGroup(0x46c0, 0x46bb, 0x50, 0x28);
+            do co_await particlesFrame(more); while (more);
+            const uint8_t s = uint8_t(--mem_[0xdefc]);
+            if (uint8_t(s + 1) == 0) break;
+        }
+        break;
+    case 9:                                            // 02:458A
+        particlesInit(1);
+        mem_[0xdeff] = 0x10;
+        for (int k = 0x10; k > 0; k--) {
+            spawnGroup(0x45b4, 0x45b7, rb(uint16_t(0x47b6 + (k & 15))), 0);
+            for (int f = 0; f < 3; f++) co_await particlesFrame(more);
+        }
+        do co_await particlesFrame(more); while (more);
+        break;
+    case 0x0c: case 0x0d: {                            // 02:45C9 / 45C0
+        int n = 8;
+        if (id == 0x0c) { copy(0x82e0, 0x8000, 0x100); particlesInit(3); n = 0x18; }
+        else particlesInit(6);
+        for (int k = n; k > 0; k--) {                  // 02:45DC, 4737: bases from 02:45F9
+            const uint16_t t = uint16_t(0x45f9 + (k & 15) * 2);
+            spawnGroup(0x463b, 0x4619, rb(uint16_t(t + 1)), rb(t));
+            co_await particlesFrame(more);
+            spawnGroup(0x463b, 0x462a, rb(uint16_t(t + 1)), rb(t));
+        }
+        co_await particlesFrame(more);
+        break;
+    }
+    }
+    clearOam();                                        // 02:45AE
+    co_await wait(1);
+}
+
+// 02:47C6 (effect A): sparks rising out of the monsters while they shimmer and flicker.
+AnimTask BattleAnim::sparks() {
+    particlesInit(0);
+    auto spark = [&] {                                 // 02:4812
+        const uint8_t y = uint8_t(rnd(0x0c) * 4 + 0x1c);
+        const uint8_t x = uint8_t(rnd(0x15) + 0x20);
+        spawnGroup(0x4830, 0x482d, x, y);
+    };
+    for (int k = 0x18; k > 0; k--) {
+        co_await wait(1);
+        spark();
+        spark();
+        // 02:4869: the SCX table (02:4872, from 02:488E), then two writes a line (02:47E9)
+        uint16_t de = 0xdebf;
+        uint8_t c = uint8_t(k);
+        for (int b = 0; b < 0x40; b++, c++) {
+            const uint16_t t = uint16_t(0x488e + (c & 15) * 2);
+            mem_[de--] = rb(t);
+            mem_[de--] = rb(uint16_t(t + 1));
+        }
+        co_await wait(1);
+        for (int l = 0; l < 0x41; l++) atLine(l, kSCX, mem_[uint16_t(0xde41 + l * 2)]);
+        atLine(0x41, kSCX, 0);
+        particlesStep();
+        spark();
+        co_await wait(1);                              // 02:4859: monsters gone for a frame
+        mem_[kSCY] = 0x40;
+        atLine(0x40, kSCY, 0);
+    }
+}
+
+// 02:4BCD (effect F): ten pairs of BG tiles replaced from 02:4C05.
+AnimTask BattleAnim::tilePatch() {
+    uint16_t src = 0x4c05;
+    for (int i = 0; i < 10; i++) {
+        const uint16_t dst = uint16_t(rb(uint16_t(0x4bf1 + i * 2)) | rb(uint16_t(0x4bf2 + i * 2)) << 8);
+        for (int k = 0; k < 0x20; k++) mem_[uint16_t(dst + k)] = rb(src++);
+    }
+    co_return;
 }
 
 // ---- dispatch ----
@@ -535,7 +834,12 @@ AnimTask BattleAnim::effect(int id) {
     case 0x02: co_await vanishReturn(); co_return;
     case 0x03: co_await shake(); co_return;
     case 0x04: co_await lcdBlink(); co_return;
+    case 0x05: co_await converge(); co_return;
+    case 0x06: co_await wave(); co_return;
+    case 0x07: case 0x08: case 0x09: case 0x0c: case 0x0d: co_await rain(id); co_return;
+    case 0x0a: co_await sparks(); co_return;
     case 0x0e: co_await bgFlash(); co_return;
+    case 0x0f: co_await tilePatch(); co_return;
     case 0x10: co_await damage(false); co_return;
     case 0x11: co_await damage(true); co_return;
     case 0x12: co_await death(); co_return;
@@ -547,13 +851,14 @@ AnimTask BattleAnim::effect(int id) {
     case 0x16: co_await partyRowClear(); co_return;
     case 0x17: statusMask(); co_return;
     default:
-        // Not translated yet: the spell raster / particle effects (5-D), 4BCD (F), 4F3E (13),
-        // 0E:7DBF (14). A short flash of the monsters stands in for them.
+        // Not translated yet: 48C6 (B, a window / BG-map zoom), 4F3E (13, a monster takes
+        // another's picture), 0E:7DBF (14). A short flash of the monsters stands in for them.
         if (std::find(unknownIds.begin(), unknownIds.end(), id) == unknownIds.end()) unknownIds.push_back(id);
         if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM effect %02X not translated\n", id);
         for (int e = 16; e > 0; e--) {
             co_await wait(1);
-            topBgp = rb(uint16_t(0x4bc9 + ((e & 0x0c) >> 2)));
+            mem_[kBGP] = rb(uint16_t(0x4bc9 + ((e & 0x0c) >> 2)));
+            atLine(64, kBGP, 0xd2);
         }
         co_return;
     }

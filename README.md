@@ -123,14 +123,18 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 **Milestone 11 – battle animations** (in progress)
 - The bank 2 animation engine translated to C++20 coroutines (`src/battleanim.cpp`) working on
   the battle's own memory image - OAM shadow, OBJ tile RAM, scroll and palette registers - so
-  the battle waits on them exactly where the GB does. The renderer draws that OBJ layer (8x16),
-  SCX / SCY and the line-64 palette split.
+  the battle waits on them exactly where the GB does. The battle screen is now drawn from that
+  memory too: BG map $9800 with the monster tiles at $9000, the 8x16 OBJ layer, and SCX / SCY /
+  palettes line by line (the raster effects wait for LY and change them part-way down).
 - Done: the party row (walking on the spot, members stepping forward, status silhouettes), the
   sprite-grid scripts over monsters (weapons, claws, impacts), shake, flashes, fades, the LCD
-  blink, damage numbers / "Miss" bouncing as particles, the monster death dissolve. Checked
-  against emulator OAM / VRAM dumps (`tests/test_battle.py`).
-- Not yet: the spell raster / particle effects (ids 5-D), the other three death styles
-  (drawn with the first), effects $0F / $13 / $14. A short flash stands in for them.
+  blink, damage numbers / "Miss" bouncing as particles, the monster death dissolve, the boss
+  deaths (line drop-out; bounce, flash and tile melt), and the spell effects: converging
+  sparks, the ripple (per-line SCX), fire, bubbles, falling rocks, orbs, clouds, the shimmer
+  with rising sparks, BG tile patches. Checked against emulator OAM / VRAM dumps
+  (`tests/test_battle.py`); `FFL3_FORCEFX=id` plays any sprite script for a look.
+- Not yet: effect $0B (a window / BG-map zoom), $13 (a monster taking another's picture),
+  $14 (0E:7DBF) and death style 2 (uses code in banks 3 / 0E). A short flash stands in.
 
 Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, the rest of
 the battle animations (above), animated water tiles. The last prologue walk on the Talon's map is placed at the

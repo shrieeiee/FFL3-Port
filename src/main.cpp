@@ -553,7 +553,7 @@ int main(int argc, char** argv) {
                 for (const Tile& x : t) std::fwrite(x.data(), 1, 64, f);
             }
             std::fwrite(v.oam.data(), 1, v.oam.size(), f);   // then the OAM and OBJ tiles $8000-$8FFF
-            std::fwrite(v.objTiles, 1, 0x1000, f);
+            std::fwrite(v.vram, 1, 0x1000, f);
             std::fclose(f);
         }
         for (uint16_t n : B.unknownNatives) std::printf("unhandled native %04X\n", n);

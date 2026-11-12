@@ -324,4 +324,15 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
 - Death style 0 (02:4FA4): mask OBJ tile 0 over the picture (rows of 8x16, Y-flipped on
   alternate rows), patterns 02:52FE + 16k (k = 7..0) scrolled up a row 3 times each, then
   02:52C1 fills the picture's BG rect with $FF. Styles 1-3 (02:5055 / 50ED / 5167) rewrite BG
-  tiles at $9000 and scroll - not translated yet.
+  tiles at $9000 and scroll. Style 1 (5055): SCY $40 / 0 per line from wDE40 (447F with
+  c=$42), a bit pattern 02:5098[k] rolled through it, 8 x 4 frames, then the whole map rows
+  0-7 cleared. Style 3 (5167): SCY bounce (02:51CA, sfx $30) until $F8, 12 x 8 frames of BGP
+  from 02:51D1 on lines 0-89 (51DE), 32 frames of every BG tile ($5A from $9000) moved down a
+  row with a random top row and masked by ~lo|hi of the old tile (51FD, sfx $36), fade 4433.
+  Style 2 (50ED) calls 03:7E74 / 0E:7D63 - not translated.
+- Spells (ids called from scripts: 5 <- $6A, 6 <- $6B, 7 <- $6C, 8 <- $6D, 9 <- $6E,
+  A <- $44, B <- $28, C <- $68, D <- $27): particle groups 02:4757 (n, then per particle
+  row<<5|col and attr|tile/2, at a base x/y; only if n <= free slots). 5 = random sparks
+  pulled 1/4 of the way to (OAM 40, 84) each step; 6 = SCX per line from a 64-entry +-table
+  (44B0) rotated each frame, 64 frames, then 96 more doubling the wrapped value; A = particles
+  plus two SCX writes a line (table 488E) and every third frame SCY $40 above line 64.

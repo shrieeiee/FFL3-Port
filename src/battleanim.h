@@ -58,17 +58,20 @@ public:
     void start(uint16_t entry);       // 0x4000: attack (wC9BD), 0x4394: effect wDE00
     bool busy() const { return root_.h && !root_.h.done(); }
     // One frame: the vblank work (party row 00:3E26, OAM DMA), then the routine runs on
-    // if its wait is over. Afterwards oam() / topBgp / topObp / blank describe the frame.
+    // if its wait is over. Afterwards oam() / reg() / blank describe the frame.
     void frame();
 
     const std::array<uint8_t, 160>& oam() const { return oam_; }
-    uint8_t topBgp = 0xd2, topObp = 0xd0;    // palettes on lines 0-63 (02:441A raster split)
+    // A video register ($FF40-$FF4B) as it was on screen line `line` this frame: the routines
+    // change SCX / SCY / BGP part-way down the screen by waiting for LY.
+    uint8_t reg(int line, uint16_t r) const;
     bool blank = false;                      // LCD off this frame (02:43C8)
 
     // 0B:7DCA with a=2 (via 0C:6001): the members' battle sprites into OBJ tiles $6C+.
     void loadMemberTiles(const std::function<int(int)>& spritePage);
-    std::function<void(int slot)> eraseEnemy;   // 02:52C1 cleared the slot's picture from the BG
+    std::function<void(int slot)> eraseEnemy;   // a picture was cleared from the BG (-1: all)
     std::function<uint8_t(uint8_t)> random;    // 00:1D2E
+    std::function<void(int)> sfx;              // a write to hFFBC
     std::vector<int> unknownIds;               // effect ids not translated yet (logged)
 
 private:
@@ -113,6 +116,21 @@ private:
     AnimTask particlesFrame(bool& more);          // 02:4EB9
     AnimTask death();                             // 02:4F20 (style 0: 4FA4)
     void vblank();                                // 00:3E26
+    void atLine(int line, uint16_t r, uint8_t v); // wait for LY = line, then write r
+    void copy(uint16_t src, uint16_t dst, int n);  // RAM to RAM
+    uint8_t rnd(uint8_t n) { return random ? random(n) : 0; }
+    void sound(int id) { if (sfx) sfx(id); }
+    void clearRect();                             // 02:52C1: picture rect wDE17-DE1A -> $FF
+    bool spawnGroup(uint16_t motion, uint16_t group, uint8_t xb, uint8_t yb);   // 02:4757
+    AnimTask converge();                          // 02:44B8 (effect 5)
+    AnimTask wave();                              // 02:4437 (effect 6)
+    void rasterTable(uint16_t r, int lines);      // 02:447F: r on lines 0..lines-1 from wDE40
+    AnimTask rain(int id);                        // 02:463E / 4697 / 458A / 45C0 / 45C9 (7, 8, 9, D, C)
+    AnimTask sparks();                            // 02:47C6 (effect A)
+    AnimTask tilePatch();                         // 02:4BCD (effect F)
+    AnimTask death1();                            // 02:5055
+    AnimTask death3();                            // 02:5167
+    AnimTask flashLines(uint16_t table, int idx); // 02:51DE
 
     const Rom& rom_;
     Mem& mem_;
@@ -120,6 +138,10 @@ private:
     std::coroutine_handle<> cur_;
     int wait_ = 0;
     bool blankNext_ = false;
+    struct LineWrite { int line; uint16_t r; uint8_t v; };
+    std::vector<LineWrite> writes_;
+    std::array<uint8_t, 12> base_{};
+    bool based_ = false;
     std::array<uint8_t, 160> oam_{};
 };
 
