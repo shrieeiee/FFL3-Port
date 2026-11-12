@@ -129,7 +129,7 @@ bool Field::occupied(int row, int col, int selfSlot) const {
 }
 
 bool Field::busy() const {
-    if (!walks_.empty()) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -276,6 +276,27 @@ void Field::wanderStep() {
 
 void Field::tick(int dir) {
     for (Actor& a : actors_) a.animTick++;
+    if (flash_) flash_--;
+    if (!glides_.empty()) {                                // 00:18F5: one pixel a frame
+        Glide& g = glides_.front();
+        for (int k = 0; k < 2; k++) {
+            if (g.slot[k] < 0) continue;
+            Actor& a = actors_[size_t(g.slot[k])];
+            a.facing = g.dir[k];
+            switch (g.dir[k]) {
+            case Dir::Up: a.offY--; break;
+            case Dir::Down: a.offY++; break;
+            case Dir::Left: a.offX--; break;
+            case Dir::Right: a.offX++; break;
+            }
+            if (a.offY % 16 == 0 && a.offX % 16 == 0) {    // back on the block grid
+                a.row = wrap(a.row + a.offY / 16, rows()); a.col = wrap(a.col + a.offX / 16, cols());
+                a.offY = a.offX = 0;
+            }
+        }
+        if (--g.frames <= 0) glides_.erase(glides_.begin());
+        return;
+    }
     // Scripted moves ($27/$28) run one at a time, a step per 8 frames.
     if (!walks_.empty()) {
         Walk& w = walks_.front();
@@ -442,6 +463,7 @@ void Field::runEventCommand(int cmd, int param) {
         default:
             std::snprintf(buf, sizeof buf, "event 10 sub %02X (not implemented)", param);
             lastEvent_ = buf;
+            if (onUnknownEvent) onUnknownEvent(buf);
             return;
         }
     }
@@ -451,6 +473,28 @@ void Field::runEventCommand(int cmd, int param) {
         case 0x01: vehicle_ = 0; return;                               // 1745
         case 0x02: return;                                             // 174c: nothing
         case 0x04: enterMap(map_, p.row, p.col, p.facing); return;     // 174d: redraw map
+        case 0x03:                                                     // 1AEA: the screen flashes 4 times
+            if (playSfx) playSfx(0x3e);
+            flash_ = 32;
+            return;
+        // Objects 4-6 gliding off in formation (two at a time), 1 px a frame.
+        case 0x05:                                                     // 17E2
+            glides_.push_back({0x40, {4, 6}, {Dir::Right, Dir::Right}});
+            glides_.push_back({0x10, {4, 6}, {Dir::Up, Dir::Right}});
+            glides_.push_back({0x40, {4, 6}, {Dir::Up, Dir::Up}});
+            return;
+        case 0x06:                                                     // 182B
+            glides_.push_back({0x30, {4, 5}, {Dir::Down, Dir::Down}});
+            glides_.push_back({0x10, {4, 5}, {Dir::Left, Dir::Down}});
+            glides_.push_back({0x30, {4, 5}, {Dir::Left, Dir::Left}});
+            return;
+        case 0x0a:                                                     // 1769
+            glides_.push_back({0x20, {4, 5}, {Dir::Down, Dir::Down}});
+            glides_.push_back({0x10, {4, 5}, {Dir::Left, Dir::Down}});
+            glides_.push_back({0x60, {4, 5}, {Dir::Left, Dir::Left}});
+            glides_.push_back({0x10, {4, 5}, {Dir::Up, Dir::Left}});
+            glides_.push_back({0x40, {4, 5}, {Dir::Up, Dir::Up}});
+            return;
         case 0x0b: runEventCommand(0x0e, 0x37); return;                // 1711
         case 0x0c: runEventCommand(0x0d, 0x02); return;                // 1728
         case 0x10:                                                     // 16EB
@@ -459,6 +503,7 @@ void Field::runEventCommand(int cmd, int param) {
         default:
             std::snprintf(buf, sizeof buf, "event 12 sub %02X (effect, not implemented)", param);
             lastEvent_ = buf;
+            if (onUnknownEvent) onUnknownEvent(buf);
             return;
         }
     case 0x17:                                                         // 19ae: shop 01:6FD4

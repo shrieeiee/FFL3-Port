@@ -139,7 +139,12 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Debug: `FFL3_FORCEFX=id` plays a sprite script on the next attack, `FFL3_FORCEEFFECT=id`
   (+ `FFL3_POKE=addr=val,...`) an effect, `FFL3_DEATHSTYLE=n` a death style.
 
-Not yet: event $10 A/C/F/5/8 and some $12 effects, animated water tiles. The last prologue walk on the Talon's map is placed at the
+- Animated map tiles (01:54A0, all 36 per-map hooks: flowing water, waterfalls, lights),
+  checked against the real game's VRAM (`tests/test_tileanim.py`). Event $12 $03 (screen
+  flash) and $05 / $06 / $0A (objects gliding off in formation).
+
+Not yet: event $10 $5 / $8 / $A / $C / $F and $12 $07-$09 / $0D-$0F / $11 (vehicle changes,
+a member transformation, the ending). The port names them on screen when one comes up. The last prologue walk on the Talon's map is placed at the
 game's hand-over spot rather than walked exactly.
 
 ## Building

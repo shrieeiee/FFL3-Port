@@ -29,8 +29,9 @@ struct Actor {
     bool scripted = false;             // the current step is an event move (no step events / battles)
     uint8_t spriteTile = 0;            // OBJ tile base (wC280)
     static constexpr int kStepFrames = 8;   // 16 px at 2 px/frame
-    int subY() const { return -dr * speed * moveFrames; }
-    int subX() const { return -dc * speed * moveFrames; }
+    int offY = 0, offX = 0;            // pixels moved by a cutscene glide (00:1874-18AF)
+    int subY() const { return -dr * speed * moveFrames + offY; }
+    int subX() const { return -dc * speed * moveFrames + offX; }
     bool proxy = false;                // companion slot (00:0730): talkable, never drawn
     bool visible() const { return used && id != 0; }
     bool drawn() const { return visible() && !proxy; }
@@ -84,6 +85,7 @@ public:
     std::function<void(int shop)> openShop;                   // event $17 (01:6FD4)
     std::function<void(int item)> giveItem;                   // event $18
     std::function<void(int id)> playSfx;
+    std::function<void(const char*)> onUnknownEvent;   // an event the port has no code for yet (logged for testers)
     bool wander = false;               // NPC random walks (01:4F66); off for headless tests
     // The Talon: the spot it is parked at (wC6E9-C6ED), flying off from it and landing.
     struct Spot { int map, row, col; };
@@ -129,6 +131,14 @@ private:
     std::vector<MapExit> exits_;
     std::array<std::array<uint8_t, 16>, 128> objTiles_{};
     struct Walk { int slot, steps; bool turn; };
+    // Event $12 cutscenes: objects gliding 1 px a frame (00:176B..). Each phase: frames, then
+    // up to two (slot, direction) pairs.
+    struct Glide { int frames; int slot[2]; Dir dir[2]; };
+    std::vector<Glide> glides_;
+    int flash_ = 0;                    // event $12 $03: 4 x (4 frames white, 4 normal)
+public:
+    bool flashWhite() const { return flash_ > 0 && ((flash_ - 1) / 4) % 2 == 1; }
+private:
     std::vector<Walk> walks_;          // queued scripted moves ($27/$28)
     uint8_t layer_ = 0;
     int vehicle_ = 0;                  // wC6E3: 0 on foot in towns, 2 on foot on the world map

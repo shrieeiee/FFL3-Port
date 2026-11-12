@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "render.h"
+#include "fieldanim.h"
 #include "console.h"
 #include "opening.h"
 #include "uitext.h"
@@ -17,9 +18,22 @@ int wrap(int v, int n) { return ((v % n) + n) % n; }
 
 void TileCache::build(const Rom& rom, const Field& f) {
     const auto bgt = loadBgTiles(rom, f.gfx());
-    for (int i = 0; i < 256; i++) decode(bgt[i].data(), bg[i]);
-    for (int i = 0; i < 128; i++) decode(f.objTiles()[i].data(), obj[i]);
+    for (int i = 0; i < 128; i++) std::copy(f.objTiles()[i].begin(), f.objTiles()[i].end(), vram.begin() + i * 16);
+    for (int i = 0; i < 256; i++)                 // BG tile numbers are signed: 0-127 at $9000
+        std::copy(bgt[i].begin(), bgt[i].end(), vram.begin() + (i < 128 ? 0x1000 + i * 16 : 0x800 + (i - 128) * 16));
+    decodeAll();
     map = f.mapId();
+}
+
+void TileCache::decodeAll() {
+    for (int i = 0; i < 256; i++) decode(&vram[size_t(i < 128 ? 0x1000 + i * 16 : 0x800 + (i - 128) * 16)], bg[size_t(i)]);
+    for (int i = 0; i < 128; i++) decode(&vram[size_t(i * 16)], obj[size_t(i)]);
+}
+
+void TileCache::animate(int hook, uint8_t frame) {
+    if (!hook || hook == 0x0c) return;
+    runMapHook(hook, frame, vram.data());
+    decodeAll();
 }
 
 // Sprite frames in a 16-tile page: +0 front, +4 back, +8 side (faces left), +12 side step.

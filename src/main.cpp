@@ -465,6 +465,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> argb;
     std::vector<uint8_t> tint;
     int tilesVersion = -1;
+    uint8_t hff93 = 0;                                       // frame counter (00:11CE)
     auto refreshTiles = [&] {
         if (tiles.map != field.mapId() || tilesVersion != field.blocksVersion()) {
             tiles.build(rom, field);
@@ -748,6 +749,12 @@ int main(int argc, char** argv) {
                 std::printf("  step %c: %s\n", c, field.lastEvent().c_str()), field.setLastEvent("");
         }
         if (!savePath.empty() && !saveGame(savePath.c_str())) return 1;
+        if (const char* vd = std::getenv("FFL3_VRAMDUMP")) {     // tests: VRAM $8000-$97FF after N hook frames
+            refreshTiles();
+            const int n = std::getenv("FFL3_HOOKFRAMES") ? std::atoi(std::getenv("FFL3_HOOKFRAMES")) : 0;
+            for (int i = 0; i < n; i++) tiles.animate(field.header().hook, uint8_t(i));
+            if (FILE* f = std::fopen(vd, "wb")) { std::fwrite(tiles.vram.data(), 1, tiles.vram.size(), f); std::fclose(f); }
+        }
         if (shop) std::printf("shop open, gold %d\n", shop->gold());
         if (partyHp >= 0) {
             std::printf("party:");
@@ -920,7 +927,10 @@ int main(int argc, char** argv) {
                 else if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
                 else if (bHeld && !bPrev && field.land()) {}            // B in the air: land (01:4250)
                 else field.tick(d);
+                refreshTiles();
+                tiles.animate(field.header().hook, hff93);              // 01:54A0 in the field main loop
             }
+            hff93++;
             if (opening == 2 && !text.active()) startNaming(0);          // the crawl is over
             if (prologue && !text.active() && !battle) finishPrologue();
             const int wantMusic = (opening == 1 || opening == 3) ? 6 : battle ? battle->formation().music() : field.music;   // 01:7C79 / 0B:4000 / map header
@@ -936,7 +946,9 @@ int main(int argc, char** argv) {
             renderBattle(*battle, bgfx, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], nullptr, argb);
         } else {
-            renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
+            RenderOpts fo = opts;
+            if (field.flashWhite()) fo.bgp = 0;                 // event $12 $03 (BGP = 0)
+            renderField(field, tiles, fo, frame, debug ? &tint : nullptr);
             renderTextBox(text, tiles, opts, frame);
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);

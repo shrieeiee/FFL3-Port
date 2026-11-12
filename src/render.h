@@ -25,7 +25,10 @@ struct TileCache {
     std::array<std::array<uint8_t, 64>, 256> bg{};
     std::array<std::array<uint8_t, 64>, 128> obj{};
     int map = -1;
+    std::array<uint8_t, 0x1800> vram{};       // $8000-$97FF as the game has it (animated)
     void build(const Rom& rom, const Field& f);
+    void animate(int hook, uint8_t frame);   // 01:54A0, then re-decode the tiles
+    void decodeAll();
 };
 
 // The dialogue window (WY=80, 20x8 tiles at $9C00): frame $F7/$FC/$F9/$FB/$F8/$FA,
