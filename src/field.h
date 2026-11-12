@@ -26,6 +26,7 @@ struct Actor {
     int animTick = 0;
     int speed = 2;                     // px per frame (wC310; wandering NPCs walk at 1)
     bool wandering = false;            // the current step is a random walk (doesn't block scripts)
+    bool scripted = false;             // the current step is an event move (no step events / battles)
     uint8_t spriteTile = 0;            // OBJ tile base (wC280)
     static constexpr int kStepFrames = 8;   // 16 px at 2 px/frame
     int subY() const { return -dr * speed * moveFrames; }
@@ -61,7 +62,8 @@ public:
     uint8_t layer() const { return layer_; }          // wCA12: $00 outside, $40 inside
     int vehicle() const { return vehicle_; }          // wC6E3
     uint8_t blockAt(int row, int col) const;
-    int blocksVersion() const { return blocksVersion_; }   // bumped when events rewrite blocks
+    int blocksVersion() const { return blocksVersion_; }
+    const Rom& rom() const { return rom_; }   // bumped when events rewrite blocks
     uint8_t attrAt(int row, int col) const;
     bool passable(int row, int col) const;
     const std::array<uint8_t, 4>& drawnTiles(uint8_t block) const;
@@ -135,6 +137,7 @@ private:
     std::vector<Return> returnStack_;  // wC7A0 / wC7C0
     Return saved_{-1, 0, 0};
     int blocksVersion_ = 0;
+    bool hideLeaderOnLoad_ = false;   // wCA00
     int holesFilled_ = 0;              // wCA01: boulders dropped this visit (event $2B)
     bool tryPush(int row, int col, Dir d);
     void applyMapPatches();

@@ -62,6 +62,7 @@ bool Field::enterMap(int map, int row, int col, Dir facing) {
     Actor& p = actors_[0];
     p.used = true;
     p.id = p.savedId = 1;
+    if (hideLeaderOnLoad_) { p.id = 0; hideLeaderOnLoad_ = false; }   // 00:054D: wCA00 (event $12 $00)
     p.facing = facing;
     if (row >= 0 && col >= 0) {
         p.row = wrap(row, rows());
@@ -143,6 +144,7 @@ void Field::startMove(int slot, Dir d, bool turn, int speed) {
     a.col = wrap(a.col + a.dc, cols());
     a.speed = speed;
     a.wandering = false;
+    a.scripted = false;
     a.moveFrames = 16 / speed;
 }
 
@@ -279,7 +281,7 @@ void Field::tick(int dir) {
         Walk& w = walks_.front();
         Actor& a = actors_[size_t(w.slot)];
         if (a.moveFrames == 0) {
-            if (w.steps-- > 0) startMove(w.slot, a.facing, w.turn);
+            if (w.steps-- > 0) { startMove(w.slot, a.facing, w.turn); a.scripted = true; }
             else walks_.erase(walks_.begin());
         }
     }
@@ -292,7 +294,10 @@ void Field::tick(int dir) {
 
     Actor& p = actors_[0];
     if (p.moveFrames > 0) {
-        if (--p.moveFrames == 0) onStepDone();
+        if (--p.moveFrames == 0) {
+            if (p.scripted) layer_ = blockAt(p.row, p.col) & 0x40;   // event moves: no step events
+            else onStepDone();
+        }
         return;
     }
     if (dir < 0 || busy()) return;
@@ -442,6 +447,7 @@ void Field::runEventCommand(int cmd, int param) {
     }
     case 0x12:                                                         // 16b9: sub-commands
         switch (param) {
+        case 0x00: hideLeaderOnLoad_ = true; return;                   // 173f: wCA00 = 1
         case 0x01: vehicle_ = 0; return;                               // 1745
         case 0x02: return;                                             // 174c: nothing
         case 0x04: enterMap(map_, p.row, p.col, p.facing); return;     // 174d: redraw map
@@ -464,7 +470,11 @@ void Field::runEventCommand(int cmd, int param) {
         if (startBattle)
             startBattle(param != 0xff ? (param | 0x80) : randomFormation(rom_, 0, vehicle_, random8()));
         return;
-    case 0x18: if (giveItem) giveItem(rom_.b(3, uint16_t(0x762a + param - 1))); return;  // 1a02
+    case 0x18:                                                         // 1a02
+        if (giveItem) giveItem(rom_.b(3, uint16_t(0x762a + param - 1)));
+        if (!flags_.test(1) && param >= 0x61)                          // 0F:7C74: story flag for it
+            flags_.event.set(rom_.b(0xf, uint16_t(0x7c7e + param - 0x61)));
+        return;
     case 0x1c: music = uint8_t(param); return;                          // 1a28
     case 0x1d: lastSfx = uint8_t(param); if (playSfx) playSfx(param); return;                        // 1a2e
     case 0x08: case 0x09:                                              // 14b2: sound, slide, exit

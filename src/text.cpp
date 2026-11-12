@@ -5,6 +5,8 @@
 
 namespace ffl3 {
 
+static const int kCharDelay = 10;   // wCED9, set to $0A on the title screen (01:7C79)
+
 namespace {
 // Codes below $4E that are dictionary words (00:30d1), entries $3A+i.
 const uint8_t kDictLow[] = {0x01, 0x02, 0x03, 0x04, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x40,
@@ -64,6 +66,13 @@ void TextBox::open(int bank, uint16_t addr) {
     pendingGlyphs_.clear();
 }
 
+void TextBox::call(int bank, uint16_t addr) {
+    if (!active_) { open(bank, addr); return; }
+    Src s;
+    s.bank = bank; s.addr = addr; s.isCall = true;
+    stack_.push_back(s);
+}
+
 int TextBox::next() {
     while (!stack_.empty()) {
         Src& s = stack_.back();
@@ -111,6 +120,7 @@ void TextBox::finish() {
 void TextBox::runRef(uint8_t lo, uint8_t hi) {
     if (hi < 0x40) {                     // 00:2ef6 -> 00:1236 event command
         if (onEvent) onEvent(hi, lo);
+        if (mustWait && mustWait()) waitEvent_ = true;   // the game runs the battle etc. inside the event
         return;
     }
     Src s;
@@ -124,6 +134,7 @@ void TextBox::runRef(uint8_t lo, uint8_t hi) {
 void TextBox::step() {
     // Execute bytes until a glyph is shown (typewriter), or we block on input.
     for (int guard = 0; guard < 512 && state_ == State::Run; guard++) {
+        if (waitEvent_) return;
         const int v = next();
         if (v < 0) { finish(); return; }
         const uint8_t b = uint8_t(v);
@@ -158,7 +169,11 @@ void TextBox::step() {
             else if (m >= 0x80) m -= 0x7b;
             else if (m >= 5 && m < 9) m -= 5;
             std::vector<uint8_t> name;
-            if (m < 4) {
+            if (m < 5 && memberName) {
+                name = memberName(m);
+            } else if (m >= 0x20 && classLabel) {
+                name = classLabel();
+            } else if (m < 4) {
                 for (char c : partyNames[size_t(m)]) {
                     uint8_t t = 0xff;
                     if (c >= 'A' && c <= 'Z') t = uint8_t(0xba + c - 'A');
@@ -264,10 +279,12 @@ void TextBox::tick(bool aPressed, bool aHeld, bool upPressed, bool downPressed) 
         }
         return;
     case State::Run:
+        if (waitEvent_ && mustWait && mustWait()) return;
+        waitEvent_ = false;
         if (isBusy && isBusy()) return;
         if (delay_ > 0 && !aHeld) { delay_--; return; }
         step();
-        if (delay_ <= 0) delay_ = 1;     // ~2 frames per character, faster while A is held
+        if (delay_ <= 0) delay_ = kCharDelay;   // 00:3593: 1 + wCED9 (10) frames a character; A held skips the wait
         return;
     case State::Idle:
         return;

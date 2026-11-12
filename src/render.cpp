@@ -1,5 +1,7 @@
+#include <algorithm>
 #include "render.h"
 #include "console.h"
+#include "opening.h"
 #include "uitext.h"
 
 namespace ffl3 {
@@ -57,6 +59,8 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
     const int pyPix = p.row * 16 + p.subY(), pxPix = p.col * 16 + p.subX();
     const int camY = pyPix - (out.h / 2 - 8), camX = pxPix - (out.w / 2 - 8);
     if (debugTint) debugTint->assign(out.px.size(), 0);
+    static std::vector<uint8_t> bgIdx;                 // BG colour index per pixel (OBJ priority)
+    bgIdx.assign(out.px.size(), 0);
 
     for (int y = 0; y < out.h; y++) {
         const int my = wrap(camY + y, mapH);
@@ -69,6 +73,7 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
             const uint8_t tile = bt[((mx >> 3) & 1) * 2 + sub];     // TL BL TR BR
             const uint8_t c = tc.bg[tile][ty * 8 + (mx & 7)];
             out.px[size_t(y) * out.w + x] = uint8_t((o.bgp >> (c * 2)) & 3);
+            bgIdx[size_t(y) * out.w + x] = c;
             if (debugTint) {
                 const uint8_t a = f.attrAt(brow, bcol);
                 (*debugTint)[size_t(y) * out.w + x] =
@@ -82,14 +87,43 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
         dx = wrap(dx + mapW / 2, mapW) - mapW / 2;
         sx = dx; sy = dy;
     };
+    // 00:3A7F: objects with wC360 bit 2 (bit 6 of their column byte) are drawn from the counted
+    // layouts: list 01:6ABE/6AFE/6B3E/6B7E[facing][move type] -> frame -> count, then
+    // (dy, dx, t): tile = base + (t & $0F) ($6F / $8F = tile $6F), t's top bits = OAM flags.
+    auto drawLayout = [&](const Actor& n, int sx, int sy) {
+        const Rom& rom = f.rom();
+        static const uint16_t tables[4] = {0x6abe, 0x6afe, 0x6b7e, 0x6b3e};   // down up left right
+        const uint16_t list = rom.w(1, uint16_t(tables[int(n.facing) & 3] + (n.obj.move & 0x1f) * 2));
+        uint16_t p = rom.w(1, list);
+        const int cnt = rom.b(1, p++);
+        for (int k = 0; k < cnt; k++, p = uint16_t(p + 3)) {
+            const int dy = int8_t(rom.b(1, p)), dx = int8_t(rom.b(1, uint16_t(p + 1)));
+            const uint8_t t = rom.b(1, uint16_t(p + 2));
+            const int tile = (t == 0x6f || t == 0x8f) ? 0x6f : (n.spriteTile + (t & 0x0f)) & 0x7f;
+            const uint8_t fl = (t == 0x6f) ? 0 : t;
+            const auto& tl = tc.obj[size_t(tile)];
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++) {
+                    const uint8_t c = tl[size_t(((fl & 0x40) ? 7 - y : y) * 8 + ((fl & 0x20) ? 7 - x : x))];
+                    if (!c) continue;
+                    const int X = sx + dx + x, Y = sy + dy + y;
+                    if (X < 0 || Y < 0 || X >= out.w || Y >= out.h) continue;
+                    const size_t at = size_t(Y) * out.w + X;
+                    if ((fl & 0x80) && bgIdx[at]) continue;
+                    out.px[at] = uint8_t((o.obp >> (c * 2)) & 3);
+                }
+        }
+    };
     for (int i = 1; i < Field::kSlots; i++) {
         const Actor& n = f.actors()[size_t(i)];
         if (!n.drawn()) continue;
         int sx, sy, tile; bool flip;
         screenPos(n, sx, sy);
+        if (n.obj.flagsX & 0x40) { drawLayout(n, sx, sy); continue; }
         frameFor(n, n.spriteTile, tile, flip);
         drawSprite(tc, o.obp, out, sx, sy, tile, flip);
     }
+    if (!p.id) return;                                // hidden (event $12 $00, actor command 4x)
     int sx, sy, tile; bool flip;
     screenPos(p, sx, sy);
     frameFor(p, p.spriteTile, tile, flip);
@@ -168,6 +202,33 @@ static void renderOverlay(const T& w, const TileCache& tc, const RenderOpts& o, 
 void renderShop(const Shop& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
 void renderMenu(const FieldMenu& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
 void renderConsole(const TalonConsole& m, const TileCache& tc, const RenderOpts& o, Frame& out) { renderOverlay(m, tc, o, out); }
+void renderNaming(const NamingScreen& m, const TileCache& tc, const RenderOpts& o, Frame& out) {
+    std::fill(out.px.begin(), out.px.end(), uint8_t(o.bgp & 3));
+    renderOverlay(m, tc, o, out);
+}
+void renderTitle(const TitleScreen& t, const TileCache& tc, const RenderOpts& o, Frame& out) {
+    std::fill(out.px.begin(), out.px.end(), uint8_t(o.bgp & 3));
+    const int x0 = (out.w - 160) / 2;
+    const auto s = t.screen();
+    for (int r = 0; r < 18; r++)
+        for (int c = 0; c < 20; c++) {
+            const uint8_t id = s[size_t(r * 20 + c)];
+            if (id >= 0x80) { drawBgTile(tc, o.bgp, out, x0 + c * 8, r * 8, id); continue; }
+            const Tile& tl = t.logoTiles()[id];
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                    out.px[size_t(r * 8 + y) * size_t(out.w) + size_t(x0 + c * 8 + x)] = uint8_t((o.bgp >> (tl[size_t(y * 8 + x)] * 2)) & 3);
+        }
+    const Tile& reg = t.registered();                 // OAM y $53 x $52 -> (74, 67)
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            if (reg[size_t(y * 8 + x)]) out.px[size_t(67 + y) * size_t(out.w) + size_t(x0 + 74 + x)] = uint8_t((o.obp >> (reg[size_t(y * 8 + x)] * 2)) & 3);
+    const auto& cur = tc.obj[0x7e];
+    const int cx = x0 + 8 * t.cursorCol() - 8, cy = t.cursorRow() * 8;
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            if (cur[size_t(y * 8 + x)]) out.px[size_t(cy + y) * size_t(out.w) + size_t(cx + x)] = uint8_t((o.obp >> (cur[size_t(y * 8 + x)] * 2)) & 3);
+}
 
 // ---- battle --------------------------------------------------------------------------------
 

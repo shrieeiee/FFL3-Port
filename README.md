@@ -108,8 +108,22 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Map event blocks: damage floors ($20), status-cure ($21) and healing ($22) spots, the
   slide-and-exit $08/$09.
 
-Not yet: event $10 A/C/F/5/8 and most $12 effects, the battle
-"Auto set" mode, battle animations, the opening sequence.
+**Milestone 10 – the opening** ✅
+- Title screen (01:7C79): the logo unpacked from 03:5C00 (00:3D76), New Game / Continue;
+  matches the real screen pixel for pixel. Continue loads `ffl3.sav`.
+- New game (01:7D40): party records, the wC6E0 block and the starting flags from the ROM,
+  the story crawl (09:5EAD) over the Water Entity, naming the four (0F:7A44: the game's
+  grid, labels and rules), then the prologue script 09:6015 - the simulator battle and every
+  cutscene up to the Talon, ending in the same state as the real game (flags, party, gold,
+  bag; `--opening` tests it). `--no-title` skips straight to the Talon as before.
+- Big story sprites (00:3A7F counted layouts) such as the Water Entity; event $12 $00 (hide
+  the leader on the next map); text at the game's speed (00:3593: 11 frames a character,
+  A held = fast); scripts wait for a battle / shop an event opens; scripted walks no longer
+  set off step events or random battles; event $18 sets its story flag (0F:7C74).
+
+Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, battle
+animations, animated water tiles. The last prologue walk on the Talon's map is placed at the
+game's hand-over spot rather than walked exactly.
 
 ## Building
 

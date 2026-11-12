@@ -49,6 +49,10 @@ struct BattleGfx {
 void renderShop(const Shop& shop, const TileCache& tc, const RenderOpts& o, Frame& out);
 void renderMenu(const FieldMenu& menu, const TileCache& tc, const RenderOpts& o, Frame& out);
 class TalonConsole;
+class TitleScreen;
+class NamingScreen;
+void renderTitle(const TitleScreen& t, const TileCache& tc, const RenderOpts& o, Frame& out);
+void renderNaming(const NamingScreen& n, const TileCache& tc, const RenderOpts& o, Frame& out);
 void renderConsole(const TalonConsole& c, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, const RenderOpts& o, Frame& out);

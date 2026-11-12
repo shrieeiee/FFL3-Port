@@ -11,6 +11,7 @@
 #include "render.h"
 #include "sound.h"
 #include "console.h"
+#include "opening.h"
 #include <functional>
 #include <SDL.h>
 #include <algorithm>
@@ -106,13 +107,14 @@ int dirFromChar(char c) {
 
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk, savePath, loadPath;
+    int runScript = -1;
     int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
     std::string keys, dumpView, ramPokes;
     int mapId = -1, scale = 5, startRow = -1, startCol = -1;
     bool wide = false, debug = false, showSlots = false, mute = false;
     std::string wavKind;
     int partyHp = -1;
-    bool wanderOpt = false;
+    bool wanderOpt = false, noTitle = false, openingTest = false, titleShots = false;
     int shopOpt = -1;
     std::vector<int> setFlags;
     int wavId = 0;
@@ -126,6 +128,7 @@ int main(int argc, char** argv) {
         else if (a == "--load" && i + 1 < argc) loadPath = argv[++i];
         else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-text" && i + 1 < argc) runTextId = int(std::strtol(argv[++i], nullptr, 16));
+        else if (a == "--run-script" && i + 1 < argc) runScript = int(std::strtol(argv[++i], nullptr, 16));   // BAAAA: bank B, address AAAA
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--battle" && i + 1 < argc) battleArg = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--keys" && i + 1 < argc) keys = argv[++i];
@@ -139,6 +142,9 @@ int main(int argc, char** argv) {
         else if (a == "--debug") debug = true;
         else if (a == "--mute") mute = true;
         else if (a == "--wander") wanderOpt = true;
+        else if (a == "--no-title") noTitle = true;
+        else if (a == "--opening") openingTest = true;
+        else if (a == "--title-shots") titleShots = true;   // test: title.bmp, naming0.bmp   // test: play the opening headless (auto A, default names)
         else if (a == "--shop" && i + 1 < argc) shopOpt = int(std::strtol(argv[++i], nullptr, 16));   // test: open shop
         else if (a == "--flag" && i + 1 < argc) setFlags.push_back(int(std::strtol(argv[++i], nullptr, 16)));   // test: set event flag
         else if (a == "--wav" && i + 3 < argc) {      // --wav music|sfx ID SECONDS (writes ffl3.wav)
@@ -237,7 +243,7 @@ int main(int argc, char** argv) {
     auto receive = [&](int item) {
         text.itemArg = item;
         const int n = inventoryAdd(battleRam, uint8_t(item));
-        text.open(9, n >= 0 ? 0x724e : 0x731a);
+        text.call(9, n >= 0 ? 0x724e : 0x731a);
         sndSfx(n < 0 ? 0x3b : item >= 0xd8 && item < 0xea ? 0x3d : 0x35);   // 0B:6D7E
     };
     field.giveItem = [&](int item) { receive(item); };
@@ -342,6 +348,7 @@ int main(int argc, char** argv) {
     field.openShop = openShop;
     std::unique_ptr<FieldMenu> menu;
     std::unique_ptr<TalonConsole> console;
+    text.mustWait = [&] { return bool(battle) || bool(shop) || bool(console); };
     field.talonConsole = [&] {
         console = std::make_unique<TalonConsole>(rom, battleRam, flags);
         console->playSfx = [&](int id) { sndSfx(id); };
@@ -371,6 +378,67 @@ int main(int argc, char** argv) {
         field.openChest(slot);
     };
     text.log = [&](const std::string& m) { field.setLastEvent(m); };
+    text.onEvent = [&](int cmd, int param) {
+        field.runEventCommand(cmd, param);
+        if (std::getenv("FFL3_PARTYLOG") && (cmd == 0x10 || cmd == 0x1b || cmd == 0x22))
+            for (size_t i = 0; i < party.size(); i++) std::fprintf(stderr, "  ev %02X %02X slot %zu: %02x %02x b3=%02x hp=%d\n", cmd, param, i, party[i].raw[0], party[i].raw[0x0d], party[i].raw[3], party[i].hp());
+    };
+
+    text.memberName = [&](int m) {                     // 00:2955: record +7, 6 glyphs ($4C = blank)
+        std::vector<uint8_t> n;
+        if (size_t(m) >= party.size()) return n;
+        for (int i = 0; i < 6; i++) { const uint8_t g = party[size_t(m)].raw[size_t(7 + i)]; n.push_back(g == 0x4c ? 0xff : g); }
+        while (!n.empty() && n.back() == 0xff) n.pop_back();
+        return n;
+    };
+    text.classLabel = [&] { return classLabel(rom, party[4]); };
+    // ---- the opening (01:7C79 / 7D40) --------------------------------------------------
+    // 0 = playing, 1 = title, 2 = story crawl, 3 = naming
+    int opening = 0, namingMember = 0;
+    bool prologue = false;                                // 09:6015 running (00:023F)
+    std::unique_ptr<TitleScreen> title;
+    std::unique_ptr<NamingScreen> naming;
+    auto startNewGame = [&] {
+        party.clear();                                    // 7D40: records 07:7A81 x 5
+        for (int i = 0; i < 5; i++) party.push_back(loadCharacter(rom, i));
+        initBattleRam(battleRam);
+        for (int i = 0; i < 0x60; i++) battleRam[size_t(0xc6e0 + i)] = rom.b(7, uint16_t(0x7e41 + i));   // wC6E0 block
+        uint8_t fl[32];
+        for (int i = 0; i < 32; i++) fl[i] = rom.b(1, uint16_t(0x7ddd + i));                            // wC760 flags
+        flags.loadEventBytes(fl);
+        flags.chest.reset();
+        field.setSavedSpot({1, 21, 21});
+        field.setVehicle(0);
+        text.open(9, 0x5ead);                             // the story crawl (warps to map 5 itself)
+        opening = 2;
+    };
+    auto startNaming = [&](int m) {
+        namingMember = m;
+        naming = std::make_unique<NamingScreen>(rom, m);
+        naming->playSfx = [&](int id) { sndSfx(id); };
+        opening = 3;
+    };
+    auto namingDone = [&] {                               // 7D97: members 0-3, B goes back one
+        if (naming->back()) { startNaming(std::max(0, namingMember - 1)); return; }
+        for (int i = 0; i < 6; i++) party[size_t(namingMember)].raw[size_t(7 + i)] = naming->name()[size_t(i)];
+        if (namingMember < 3) { startNaming(namingMember + 1); return; }
+        naming.reset();
+        party[4] = party[3];                              // 7DB3: wC620 -> wC680
+        field.joinParty(3, 2);                            // 0B:6DE4 (a = 3, b = 2)
+        field.leaveParty(4);                              // 0B:6E33 (a = 4)
+        text.open(9, 0x6015);                             // the prologue (00:0250)
+        prologue = true;
+        opening = 0;
+    };
+    // 00:0255: once the prologue text is over, flag $31 = prologue done (random battles on, and
+    // a reset skips the opening). Control starts on the Talon's map at (26,7) facing up - the
+    // spot the real game hands over at.
+    auto finishPrologue = [&] {
+        prologue = false;
+        flags.event.set(0x31);
+        if (field.mapId() == 0x0b) field.enterMap(0x0b, 26, 7, Dir::Up);
+    };
+
     // New game: the Talon is parked on world map 1 at scroll ($100, $100) (wC6E9-C6ED from RAM);
     // wC6F8-C6FB: part $D8 attached, no engine chosen.
     field.setSavedSpot({1, 21, 21});
@@ -380,6 +448,7 @@ int main(int argc, char** argv) {
         if (!loadGame(loadPath.c_str())) { std::fprintf(stderr, "can't load %s\n", loadPath.c_str()); return 1; }
     } else if (mapId < 0) {                                  // new game
         field.enterMap(0x0b, startRow >= 0 ? startRow : 26, startCol >= 0 ? startCol : 7, Dir::Up);
+        if (!noTitle && startRow < 0) { title = std::make_unique<TitleScreen>(rom); opening = 1; }
     } else {
         if (mapId < 6) field.setVehicle(2);            // debug jump straight onto a world map
         if (!field.enterMap(mapId, startRow, startCol)) field.enterMap(nextValid(rom, mapId, 1));
@@ -517,10 +586,85 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (titleShots) {
+        TileCache tc;
+        tc.build(rom, field);
+        RenderOpts o;
+        Frame fr;
+        fr.resize(160, 144);
+        std::vector<uint32_t> px;
+        TitleScreen t(rom);
+        renderTitle(t, tc, o, fr);
+        toArgb(fr, kPalettes[0], nullptr, px);
+        saveBmp(px, 160, 144, "title.bmp");
+        for (int m = 0; m < 4; m++) {
+            NamingScreen n(rom, m);
+            if (m == 0) for (int i = 0; i < 6; i++) { OpeningInput in; in.a = true; n.tick(in); }
+            renderNaming(n, tc, o, fr);
+            toArgb(fr, kPalettes[0], nullptr, px);
+            saveBmp(px, 160, 144, ("naming" + std::to_string(m) + ".bmp").c_str());
+        }
+        return 0;
+    }
+
+    // ---- headless: the whole opening, auto A, default names; prints the state at the end ----
+    if (openingTest) {
+        startNewGame();
+        auto run = [&](int maxFrames) {
+            for (int f = 0; f < maxFrames && (text.active() || field.busy() || battle); f++) {
+                if (battle) {
+                    BattleInput in;
+                    in.a = f % 6 == 0; in.aHeld = true;
+                    battle->tick(in);
+                    if (battle->finished()) { std::printf("battle: %s\n", battle->result() == Battle::Result::Won ? "won" : "not won"); finishBattle(); }
+                    continue;
+                }
+                field.tick(-1);
+                text.tick(f % 20 == 0, false, false, false);
+            }
+        };
+        if (!shot.empty()) {                              // --shot FILE --shot-at N: the crawl at frame N
+            for (int f = 0; f < shotAt && text.active(); f++) { field.tick(-1); text.tick(false, false, false, false); }
+            TileCache tc; tc.build(rom, field);
+            RenderOpts o; Frame fr; fr.resize(160, 144);
+            std::vector<uint32_t> px;
+            renderField(field, tc, o, fr, nullptr);
+            renderTextBox(text, tc, o, fr);
+            toArgb(fr, kPalettes[0], nullptr, px);
+            saveBmp(px, 160, 144, shot.c_str());
+            return 0;
+        }
+        run(60 * 600);
+        std::printf("crawl done: map %02X\n", field.mapId());
+        startNaming(0);
+        for (int m = 0; m < 4 && naming; m++) { OpeningInput in; in.start = true; naming->tick(in); namingDone(); }
+        run(60 * 3000);
+        if (prologue && !text.active()) finishPrologue();
+        const Actor& p = field.player();
+        std::printf("end: map %02X at %d,%d facing %d vehicle %d text %d\n", field.mapId(), p.row, p.col, int(p.facing), field.vehicle(), int(text.active()));
+        std::printf("gold %d\nbag:", battleRam[0xc6e0] | battleRam[0xc6e1] << 8 | battleRam[0xc6e2] << 16);
+        for (int i = 0; i < 24; i++) if (battleRam[size_t(0xc6ff + i * 2)] != 0xff) std::printf(" %02X x%d", battleRam[size_t(0xc6ff + i * 2)], battleRam[size_t(0xc700 + i * 2)]);
+        std::printf("\nflags:");
+        for (int i = 0; i < 32; i++) {
+            uint8_t b = 0;
+            for (int k = 0; k < 8; k++) if (flags.event.test(size_t(i * 8 + k))) b |= uint8_t(0x80 >> k);
+            std::printf(" %02x", b);
+        }
+        std::printf("\n");
+        for (size_t i = 0; i < party.size(); i++) {
+            std::printf("record %zu:", i);
+            for (int k = 0; k < 0x60; k++) std::printf("%02x", party[i].raw[size_t(k)]);
+            std::printf("\n");
+        }
+        return 0;
+    }
+
     // ---- headless: run NPC text `runTextId` in the field (events + actor moves), auto-A ----
-    if (runTextId >= 0) {
-        text.open(0xa, rom.ptr(0xa, 0x4004, runTextId - 1));
-        for (int f = 0; f < 60 * 120 && (text.active() || field.busy()); f++) {
+    if (runTextId >= 0 || runScript >= 0) {
+        if (runScript >= 0) text.open(runScript >> 16, uint16_t(runScript));
+        else text.open(0xa, rom.ptr(0xa, 0x4004, runTextId - 1));
+        for (int f = 0; f < 60 * 600 && (text.active() || field.busy() || battle); f++) {
+            if (battle) { std::printf("(battle %s skipped)\n", field.lastEvent().c_str()); battle.reset(); }
             field.tick(-1);
             text.tick(f % 20 == 0, false, false, false);
         }
@@ -655,6 +799,7 @@ int main(int argc, char** argv) {
     Uint64 last = SDL_GetPerformanceCounter();
     double acc = 0;
     bool aPrev = true, upPrev = true, downPrev = true, bPrev = true, leftPrev = true, rightPrev = true;
+    bool startPrev = true, aKeyPrev = true;
 
     while (running) {
         SDL_Event e;
@@ -673,13 +818,13 @@ int main(int argc, char** argv) {
             case SDLK_F1: debug = !debug; break;
             case SDLK_F2: field.noClip = !field.noClip; break;
             case SDLK_m: case SDLK_RSHIFT: case SDLK_LSHIFT:
-                if (!battle && !shop && !menu && !text.active()) openMenu();
+                if (!opening && !battle && !shop && !menu && !console && !text.active()) openMenu();
                 break;
             case SDLK_F5: field.setLastEvent(saveGame("ffl3.sav") ? "saved to ffl3.sav" : "save failed"); break;
             case SDLK_F9: field.setLastEvent(loadGame("ffl3.sav") ? "loaded ffl3.sav" : "no save (ffl3.sav)"); break;
             case SDLK_F3: field.encounters = !field.encounters;
                 field.setLastEvent(field.encounters ? "random battles on" : "random battles off"); break;
-            case SDLK_F4: if (!battle) field.startBattle(randomFormation(rom, field.encounterArea(), field.vehicle(), field.random8())); break;
+            case SDLK_F4: if (!battle && !opening && !text.active()) field.startBattle(randomFormation(rom, field.encounterArea(), field.vehicle(), field.random8())); break;
             case SDLK_TAB: wide = !wide; frame.resize(wide ? 256 : 160, 144); break;
             case SDLK_p: pal = (pal + 1) % kNumPalettes; break;
             case SDLK_F12: {
@@ -709,7 +854,24 @@ int main(int argc, char** argv) {
             const bool aPressed = aHeld && !aPrev;
             const bool bHeld = k[SDL_SCANCODE_X] || k[SDL_SCANCODE_BACKSPACE];
             const bool left = d == int(Dir::Left), right = d == int(Dir::Right);
-            if (menu) {
+            const bool startHeld = k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER];
+            const bool startPressed = startHeld && !startPrev;
+            startPrev = startHeld;
+            if (opening == 1 || opening == 3) {
+                OpeningInput in;
+                const bool aKey = k[SDL_SCANCODE_Z] || k[SDL_SCANCODE_SPACE];   // Enter is Start here
+                in.a = aKey && !aKeyPrev; in.b = bHeld && !bPrev; in.start = startPressed;
+                in.up = up && !upPrev; in.down = down && !downPrev; in.left = left && !leftPrev; in.right = right && !rightPrev;
+                aKeyPrev = aKey;
+                if (opening == 1) {
+                    title->tick(in);
+                    if (title->choice() == 2 && loadGame("ffl3.sav")) { title.reset(); opening = 0; }
+                    else if (title->choice()) { title.reset(); startNewGame(); }
+                } else {
+                    naming->tick(in);
+                    if (naming->done()) namingDone();
+                }
+            } else if (menu) {
                 MenuInput in;
                 in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
                 in.left = left && !leftPrev; in.right = right && !rightPrev;
@@ -744,12 +906,18 @@ int main(int argc, char** argv) {
                 else if (bHeld && !bPrev && field.land()) {}            // B in the air: land (01:4250)
                 else field.tick(d);
             }
-            const int wantMusic = battle ? battle->formation().music() : field.music;   // 0B:4000 / map header
+            if (opening == 2 && !text.active()) startNaming(0);          // the crawl is over
+            if (prologue && !text.active() && !battle) finishPrologue();
+            const int wantMusic = (opening == 1 || opening == 3) ? 6 : battle ? battle->formation().music() : field.music;   // 01:7C79 / 0B:4000 / map header
             if (wantMusic != curMusic) { curMusic = wantMusic; sndMusic(wantMusic); }
             aPrev = aHeld; upPrev = up; downPrev = down; bPrev = bHeld; leftPrev = left; rightPrev = right;
         }
         refreshTiles();
-        if (battle) {
+        if (opening == 1 || opening == 3) {
+            if (opening == 1) renderTitle(*title, tiles, opts, frame);
+            else renderNaming(*naming, tiles, opts, frame);
+            toArgb(frame, kPalettes[pal], nullptr, argb);
+        } else if (battle) {
             renderBattle(*battle, bgfx, tiles, opts, frame);
             toArgb(frame, kPalettes[pal], nullptr, argb);
         } else {

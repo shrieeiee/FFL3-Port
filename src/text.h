@@ -36,6 +36,7 @@ public:
 
     // Start a text at bank:addr. Opens the window.
     void open(int bank, uint16_t addr);
+    void call(int bank, uint16_t addr);   // run inside the current text if one is active, else open
     bool active() const { return active_; }
     // Abandon the running text (game over mid-script).
     void close() { stack_.clear(); active_ = false; state_ = State::Idle; }
@@ -50,11 +51,16 @@ public:
     int blink() const { return blink_; }
 
     GameFlags* flags = nullptr;
+    // Names of members 0-4 (record +7, 6 glyphs) and the class label of the record being named
+    // (00:29C0); when set they are used instead of partyNames.
+    std::function<std::vector<uint8_t>(int member)> memberName;
+    std::function<std::vector<uint8_t>()> classLabel;
     std::array<std::string, 4> partyNames{{"Arthur", "Curtis", "Sharon", "Gloria"}};
     int itemArg = -1;                                   // wCE94 for the $1E item-name code
     std::function<void(int cmd, int param)> onEvent;   // event command refs (hi < $40)
     std::function<void(const std::string&)> log;
     std::function<bool()> isBusy;                      // scripts wait for actor moves
+    std::function<bool()> mustWait;                    // a battle / shop / cockpit an event opened: stop until it closes
 
 private:
     enum class State { Idle, Run, WaitA, WaitScroll, WaitEnd, Choice };
@@ -81,6 +87,7 @@ private:
     int delay_ = 0, blink_ = 0, choice_ = 0;
     uint8_t choiceA_[2]{}, choiceB_[2]{};
     std::vector<uint8_t> pendingGlyphs_;
+    bool waitEvent_ = false;
     bool clearOnResume_ = false;
     bool waitBeforeNextLine_ = false;
 public:

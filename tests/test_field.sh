@@ -30,6 +30,10 @@ check "Talon cockpit: Depart needs flag 5 (01:79B3)" "map 10 layout 04 gfx 04 sp
 check "Talon: takes off from wC6E9 (01:63E6)" "map 01 layout 1C gfx 17 sprites 19  32x32  player 21,21  npcs 1  [took off]" --flag 5 --map 10 --pos 5,16 --walk UAA
 check "Talon: flies over mountains (mode 6)" "player 25,25" --flag 5 --flag 3a --map 10 --pos 5,16 --walk UAARRRRDDDD
 check "Talon: B lands, back in the cockpit (01:4250)" "player 5,16  npcs 1  [landed]" --flag 5 --flag 3a --map 10 --pos 5,16 --walk UAARRRRDDDDB
+check "opening: prologue ends where the game hands over" "end: map 0B at 26,7" --opening
+check "opening: flags at hand-over = the real game's wC760" "flags: 01 02 80 78 03 c8 c0 00 40 00 0c 91 1a 00 00 01 81 00 02 a2 a0 02 0f 40 15 20 02 10 00 00 03 ff" --opening
+check "opening: gold and bag at hand-over" "gold 960
+bag: E6 x1" --opening
 python3 -I "$(dirname "$0")/../tools/ffl3text.py" "$ROM" | grep -q "239 NPC texts: 239 end exactly" \
   && echo "ok   all 239 NPC texts parse exactly" || { echo "FAIL NPC text parse"; fail=1; }
 exit $fail
