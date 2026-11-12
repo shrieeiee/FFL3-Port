@@ -329,7 +329,19 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   0-7 cleared. Style 3 (5167): SCY bounce (02:51CA, sfx $30) until $F8, 12 x 8 frames of BGP
   from 02:51D1 on lines 0-89 (51DE), 32 frames of every BG tile ($5A from $9000) moved down a
   row with a random top row and masked by ~lo|hi of the old tile (51FD, sfx $36), fade 4433.
-  Style 2 (50ED) calls 03:7E74 / 0E:7D63 - not translated.
+  Style 2 (50ED, a boss's second form): 03:7E74 lifts map cols 7-12 rows 0-7 into 24 8x16 OBJs
+  (tiles recoloured lo = ~lo ^ hi, OBP1 $D8); 0E:7D63 loads 0E:6735 ($5A0) to $9000 and builds
+  the map from the bit mask 0E:7D9A (16 cells a row from col 2); 127 frames of SCY 51CC /
+  SCX +-d / BGP 4430 above line 72; then 48 frames of BGP from 51CA (c = 1).
+- Effect B (48C6): window map backed up to $9D60 and blanked, BG row 31 filled with $FC; per
+  line (498C, after hblank): WX = table 4B47 + $A5, SCY = $F9 - line, SCX = table - 1. The
+  window's line counter makes the backup reappear at the message box's usual place.
+- Effect 13 (4F3E, entered with a = $3E): mask over monster wC985, then wC9D6's map rect is
+  copied over wC985's; mask patterns from 02:537E.
+- Effect 14 (0E:7DBF): a 16x16 object (0E:6CCF, +$40 unless wC91B >= $77) put at map (9,4)
+  over tiles 0-3 and scrolled in (SCY table 0E:7E1F, SCX $28 down by 4 every 3 frames); for a
+  big target (wCC51 & $57 = $57, wC91B < $78) 0E:7E86 / mask 0E:7E56 with SCY / WY pairs from
+  0E:7E66. The bytecode stores $13 / $14 / $0F to wDE00 at 0C:723E / 59E1 / 7F2A.
 - Spells (ids called from scripts: 5 <- $6A, 6 <- $6B, 7 <- $6C, 8 <- $6D, 9 <- $6E,
   A <- $44, B <- $28, C <- $68, D <- $27): particle groups 02:4757 (n, then per particle
   row<<5|col and attr|tile/2, at a base x/y; only if n <= free slots). 5 = random sparks

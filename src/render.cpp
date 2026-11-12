@@ -272,7 +272,7 @@ void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, cons
         const uint8_t* d = v.vram + 0x1000 + t * 16 + py * 2;
         return uint8_t(((d[0] >> (7 - px)) & 1) | (((d[1] >> (7 - px)) & 1) << 1));
     };
-    for (int y = 0; y < std::min(wy, out.h); y++) {
+    for (int y = 0; y < (v.rawWindow ? out.h : std::min(wy, out.h)); y++) {
         const int by = (y + v.scy[size_t(y)]) & 255;
         const uint8_t* row = v.vram ? v.vram + 0x1800 + (by >> 3) * 32 : nullptr;
         for (int X = 0; X < out.w; X++) {
@@ -281,7 +281,23 @@ void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, cons
             put(X, y, v.bgp[size_t(y)], bgPixel(t, bx & 7, by & 7));
         }
     }
-    // the window
+    // the window: the GB's rules when an animation drives it, else the battle's own
+    if (v.rawWindow) {
+        int line = 0;
+        bool on = false;
+        for (int y = 0; y < out.h; y++) {
+            if (!(v.lcdc[size_t(y)] & 0x20)) continue;
+            if (!on && y >= v.wyReg[size_t(y)]) on = true;
+            if (!on || v.wx[size_t(y)] > 166) continue;
+            const uint8_t* row = v.vram + 0x1c00 + ((line >> 3) & 31) * 32;
+            for (int X = x0 + v.wx[size_t(y)] - 7; X < x0 + 160; X++) {
+                const int wxp = X - (x0 + v.wx[size_t(y)] - 7);
+                if (X < x0) continue;
+                put(X, y, v.bgp[size_t(y)], bgPixel(row[(wxp >> 3) & 31], wxp & 7, line & 7));
+            }
+            line++;
+        }
+    } else
     for (int y = wy; y < out.h; y += 8)
         for (int c = 0; c < 20; c++) {
             const int row = (y - wy) / 8;

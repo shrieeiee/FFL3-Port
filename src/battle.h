@@ -51,6 +51,8 @@ struct BattleView {
     std::array<uint8_t, 160> oam{};          // 40 entries (y, x, tile, attr), 8x16
     const uint8_t* vram = nullptr;           // $8000-$9FFF
     std::array<uint8_t, 144> scx{}, scy{}, bgp{}, obp0{}, obp1{};
+    bool rawWindow = false;                  // an animation drives the window: map $9C00, WX / WY / LCDC per line
+    std::array<uint8_t, 144> wx{}, wyReg{}, lcdc{};
     bool blank = false;
 };
 
@@ -112,6 +114,7 @@ private:
     void buildBg();                          // pictures into $9000 / $9800 as bank 0B does
     bool startAnim(uint16_t entry);          // true: finished at once
     void hidePartyRow();
+    void clearDeadPictures();
     Formation form_;
     EnemyLayout layout_;
     std::vector<Monster> groups_;

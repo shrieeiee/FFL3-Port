@@ -120,7 +120,7 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   A held = fast); scripts wait for a battle / shop an event opens; scripted walks no longer
   set off step events or random battles; event $18 sets its story flag (0F:7C74).
 
-**Milestone 11 – battle animations** (in progress)
+**Milestone 11 – battle animations** ✅
 - The bank 2 animation engine translated to C++20 coroutines (`src/battleanim.cpp`) working on
   the battle's own memory image - OAM shadow, OBJ tile RAM, scroll and palette registers - so
   the battle waits on them exactly where the GB does. The battle screen is now drawn from that
@@ -131,13 +131,15 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   blink, damage numbers / "Miss" bouncing as particles, the monster death dissolve, the boss
   deaths (line drop-out; bounce, flash and tile melt), and the spell effects: converging
   sparks, the ripple (per-line SCX), fire, bubbles, falling rocks, orbs, clouds, the shimmer
-  with rising sparks, BG tile patches. Checked against emulator OAM / VRAM dumps
-  (`tests/test_battle.py`); `FFL3_FORCEFX=id` plays any sprite script for a look.
-- Not yet: effect $0B (a window / BG-map zoom), $13 (a monster taking another's picture),
-  $14 (0E:7DBF) and death style 2 (uses code in banks 3 / 0E). A short flash stands in.
+  with rising sparks, the whirling disc (window edge per line), BG tile patches, a monster
+  taking another's picture, the thrown object, and the boss changing form (death style 2).
+  All 24 effect ids are translated. Checked against emulator OAM / VRAM dumps where there
+  are recordings (`tests/test_battle.py`); the spell effects are checked by eye so far.
+- Debug: `FFL3_FORCEFX=id` plays a sprite script on the next attack, `FFL3_FORCEEFFECT=id`
+  (+ `FFL3_POKE=addr=val,...`) an effect, `FFL3_DEATHSTYLE=n` a death style.
 
-Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, the rest of
-the battle animations (above), animated water tiles. The last prologue walk on the Talon's map is placed at the
+Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, animated water
+tiles. The last prologue walk on the Talon's map is placed at the
 game's hand-over spot rather than walked exactly.
 
 ## Building

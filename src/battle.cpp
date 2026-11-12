@@ -242,7 +242,22 @@ bool Battle::native(uint16_t addr) {
 bool Battle::startAnim(uint16_t entry) {
     if (const char* fx = std::getenv("FFL3_FORCEFX"); fx && entry == 0x4000)   // debug: try a script
         vm_.mem[0xc9bd] = uint8_t(0x80 | std::strtol(fx, nullptr, 16));
+    if (const char* fx = std::getenv("FFL3_FORCEEFFECT"); fx && entry == 0x4000) {   // debug: an effect id
+        vm_.mem[0xc9bd] = uint8_t(std::strtol(fx, nullptr, 16) & 0x3f);
+        if (const char* p = std::getenv("FFL3_POKE"))     // ADDR=VAL,...
+            for (const char* q = p; *q;) {
+                char* e; const long a = std::strtol(q, &e, 16); const long v = std::strtol(e + 1, &e, 16);
+                vm_.mem[size_t(a)] = uint8_t(v); q = *e ? e + 1 : e;
+            }
+    }
     if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9bd=%02X actor=%02X target=%02X\n", entry, m(0xde00), m(0xc9bd), m(0xc9d8), m(0xc9d6));
+    {                                                  // the window as the GB has it at $9C00
+        const BattleView cur = view();
+        for (int r = 0; r < 10; r++)
+            for (int c = 0; c < 20; c++) vm_.mem[size_t(0x9c00 + r * 32 + c)] = cur.win[size_t(r * 20 + c)];
+        vm_.mem[0xff4a] = uint8_t(cur.wy);
+        vm_.mem[0xff4b] = 7;
+    }
     anim_.start(entry);
     if (!anim_.busy()) return true;
     state_ = State::Wait;
@@ -255,6 +270,10 @@ void Battle::hidePartyRow() {
     for (int i = 0; i < 40; i++) vm_.mem[size_t(0xdc83 + i)] = 0;
     vm_.mem[0xcbff] = 0;
     for (int i = 0; i < 0xa0; i++) vm_.mem[size_t(0xc000 + i)] = 0;
+    clearDeadPictures();
+}
+
+void Battle::clearDeadPictures() {
     for (size_t s = 0; s < layout_.slots.size() && s < 8; s++) {
         if (enemyAlive(int(s))) continue;              // gone without an animation: clear it
         const EnemySlot& e = layout_.slots[s];
@@ -403,7 +422,13 @@ void Battle::tick(const BattleInput& in) {
         runVm();
         return;
     case State::Wait:
-        if (!anim_.busy()) runVm();
+        if (anim_.busy()) return;
+        if (anim_.restoreBg) {                         // effect $14 drew over the pictures
+            anim_.restoreBg = false;
+            buildBg();
+            clearDeadPictures();
+        }
+        runVm();
         return;
     case State::Message:
         if (--typeDelay_ > 0) return;
@@ -670,6 +695,14 @@ BattleView Battle::view() const {
         v.scx[size_t(y)] = anim_.reg(y, 0xff43); v.scy[size_t(y)] = anim_.reg(y, 0xff42);
         v.bgp[size_t(y)] = anim_.reg(y, 0xff47); v.obp0[size_t(y)] = anim_.reg(y, 0xff48);
         v.obp1[size_t(y)] = anim_.reg(y, 0xff49);
+        v.wx[size_t(y)] = anim_.reg(y, 0xff4b); v.wyReg[size_t(y)] = anim_.reg(y, 0xff4a);
+        v.lcdc[size_t(y)] = anim_.reg(y, 0xff40);
+    }
+    v.rawWindow = anim_.ownsWindow && anim_.busy();
+    if (std::getenv("FFL3_REGDUMP") && anim_.busy()) {
+        std::fprintf(stderr, "REG raw=%d", v.rawWindow);
+        for (int y = 0; y < 144; y += 8) std::fprintf(stderr, " %d:%02x/%02x/%02x/%02x", y, v.bgp[size_t(y)], v.wx[size_t(y)], v.wyReg[size_t(y)], v.scy[size_t(y)]);
+        std::fprintf(stderr, "\n");
     }
     v.blank = anim_.blank;
     auto brackets = [&v](int x0, int y0, int x1, int y1) {

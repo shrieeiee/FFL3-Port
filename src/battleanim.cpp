@@ -513,7 +513,7 @@ AnimTask BattleAnim::death() {
     if (const char* ds = std::getenv("FFL3_DEATHSTYLE")) style = std::atoi(ds) & 3;   // debug
     if (style == 1) { co_await death1(); co_return; }
     if (style == 3) { co_await death3(); co_return; }
-    if (style == 2 && std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM death style 2 (drawn as style 0)\n");
+    if (style == 2) { co_await death2(); co_return; }
     for (int i = 0; i < 32; i++) mem_[uint16_t(0x8000 + i)] = 0;
     // 02:4FD0: the mask sprites
     {
@@ -650,6 +650,220 @@ AnimTask BattleAnim::death3() {
     if (eraseEnemy) eraseEnemy(-1);
     co_await wait(1);
     mem_[kSCX] = mem_[kSCY] = 0;
+}
+
+// 02:50ED (death style 2, a boss changing form): the picture is lifted into 24 OBJs
+// (03:7E74, recoloured, OBP1 $D8), the BG gets the new form (0E:7D63) which shudders in under
+// it for 127 frames, then the sprites go and the screen flashes.
+AnimTask BattleAnim::death2() {
+    copy(0x9800, 0xdf00, 0x100);
+    uint16_t de = 0x8000;
+    for (int c = 0; c < 0x100; c += 0x40)
+        for (int b = 7; b < 13; b++)
+            for (int half = 0; half < 2; half++) {
+                const uint8_t t = mem_[uint16_t(0xdf00 + b + c + half * 0x20)];
+                for (int k = 0; k < 16; k++)
+                    mem_[uint16_t(de + k)] = t == 0xff ? 0 : mem_[uint16_t(0x9000 + t * 16 + k)];
+                de = uint16_t(de + 16);
+            }
+    uint16_t o = kOam;
+    uint8_t e = 0;
+    for (int y = 0x10; y <= 0x40; y += 0x10)
+        for (int x = 0x40; x < 0x70; x += 8) {
+            mem_[o++] = uint8_t(y); mem_[o++] = uint8_t(x); mem_[o++] = uint8_t(e++ * 2); mem_[o++] = 0x10;
+        }
+    for (int i = 0; i < 0x300; i += 2)                 // lo = ~lo ^ hi
+        mem_[uint16_t(0x8000 + i)] = uint8_t(~mem_[uint16_t(0x8000 + i)] ^ mem_[uint16_t(0x8001 + i)]);
+    co_await wait(1);
+    mem_[kSCY] = 0x40;
+    mem_[0xff49] = 0xd8;
+    for (int i = 0; i < 0x5a0; i++) mem_[uint16_t(0x9000 + i)] = rom_.b(0x0e, uint16_t(0x6735 + i));
+    maskMap(0x0e, 0x7d9a, 16);
+    for (int d = 0x7f; d > 0; d--) {
+        co_await wait(1);
+        const uint8_t a = rb(uint16_t(0x51ca + ((d >> 1) & 3)));
+        if (!a) sound(0x1c);
+        mem_[kSCY] = a;
+        mem_[kSCX] = (d & 1) ? uint8_t(-d) : uint8_t(d);
+        mem_[kBGP] = rb(uint16_t(0x4430 + ((d >> 5) & 3)));
+        atLine(0x48, kSCX, 0);
+        atLine(0x48, kSCY, 0);
+        atLine(0x48, kBGP, 0xd2);
+    }
+    sound(0x1c);
+    clearOam();
+    for (int k = 0x30; k > 0; k--) {                   // 02:51E0 with c = 1
+        co_await wait(1);
+        mem_[kBGP] = rb(uint16_t(0x51ca + k - 1));
+        atLine(0x5a, kBGP, 0xd2);
+    }
+}
+
+// 0E:7D7E: the map from a bit mask, 16 cells a row from column 2, cells numbered in order.
+void BattleAnim::maskMap(int bank, uint16_t mask, int bytes) {
+    for (int i = 0; i < 0x100; i++) mem_[uint16_t(0xdf00 + i)] = 0xff;
+    uint8_t c = 0;
+    uint16_t hl = 0xdf02;
+    for (int i = 0; i < bytes; i++) {
+        uint8_t a = rom_.b(bank, uint16_t(mask + i));
+        for (int b = 0; b < 8; b++, hl++, a = uint8_t(a << 1))
+            if (a & 0x80) mem_[hl] = c++;
+        if (i & 1) hl = uint16_t(hl + 0x10);
+    }
+    copy(0xdf00, 0x9800, 0x100);
+}
+
+// 02:498C: from line `start` (plus a 0-3 wobble), n lines: the window's left edge from the
+// table, the BG showing row 31 (filled with tile $FC) scrolled by the same table - a disc.
+// Above it BGP = bgp and the window (blanked) covers the screen.
+void BattleAnim::vortexLines(uint16_t table, int start, int n, uint8_t bgp) {
+    mem_[0xde10]++;
+    int d = start + (mem_[0xde10] & 3);
+    mem_[0xff4a] = 0;
+    mem_[kSCY] = 0;
+    mem_[kBGP] = bgp;
+    mem_[kOBP0] = mem_[0xde12];
+    for (int i = 0; i < n; i++, d++, table++) {
+        const uint8_t v = rb(table);
+        atLine(d + 1, 0xff4b, uint8_t(v + 0xa5));
+        atLine(d + 1, kSCY, uint8_t(0xf9 - d));
+        atLine(d + 1, kSCX, uint8_t(v - 1));
+    }
+    atLine(d + 1, 0xff4b, 7);
+    atLine(d + 1, kSCY, 0);
+    atLine(d + 1, kBGP, 0xd2);
+    atLine(d + 1, kOBP0, 0xd2);
+}
+
+// 02:48C6 (effect B): the window is blanked and the monsters turn to silhouettes while a
+// whirling disc with particles opens over them; then it fades and the window comes back.
+AnimTask BattleAnim::vortex() {
+    ownsWindow = true;
+    for (int i = 0; i < 20; i++) mem_[uint16_t(0x9be0 + i)] = 0xfc;
+    particlesInit(0);
+    mem_[0xdeff] = 1;
+    mem_[0xde12] = 0xd2;
+    copy(0x9c00, 0x9d60, 0x140);                       // 02:48AE
+    for (int i = 0; i < 0x140; i++) mem_[uint16_t(0x9c00 + i)] = 0xff;
+    for (int k = 0x40; k > 0; k--) {
+        mem_[0xde0f] = uint8_t(k);
+        const uint16_t g = uint16_t(0x49fd + (((0x40 - k) >> 3) & 7) * 2);   // 02:49DD
+        spawnGroup(0x4ba6, uint16_t(rb(g) | rb(uint16_t(g + 1)) << 8), 0x08, 0x0c);
+        co_await wait(1);                              // 02:497F
+        vortexLines(0x4b47, k, 0x41 - k, 3);
+        particlesStep();
+        co_await wait(1);
+        vortexLines(0x4b47, k, 0x41 - k, 3);
+    }
+    for (int c = 0x1f; c > 0; c--) {                   // 02:493D
+        const int b = (c >> 3) & 3;
+        mem_[0xde12] = rb(uint16_t(0x4433 + b));
+        co_await wait(1);
+        vortexLines(uint16_t(0x4b47 + 0x20 - c), 1, 0x40, uint8_t(b));
+        co_await wait(1);
+        mem_[0xff4a] = 0; mem_[kSCY] = 0; mem_[kSCX] = 0;
+        mem_[0xff4b] = 0xa5;
+        mem_[kBGP] = rb(uint16_t(0x4430 + b));
+        atLine(0x45, 0xff4b, 7);
+        atLine(0x45, kSCY, 0);
+        atLine(0x45, kBGP, 0xd2);
+        atLine(0x45, kOBP0, 0xd2);
+    }
+    clearOam();
+    co_await wait(1);
+    mem_[kLCDC] = 0xc7;
+    copy(0x9d60, 0x9c00, 0x140);
+    co_await wait(1);
+    mem_[kLCDC] = 0xe7;
+    mem_[0xff4a] = 0x58; mem_[0xff4b] = 7;
+    mem_[kSCY] = mem_[kSCX] = 0;
+    for (int i = 0; i < 0x140; i++) mem_[uint16_t(0x9d60 + i)] = 0xff;
+    for (int i = 0; i < 20; i++) mem_[uint16_t(0x9be0 + i)] = 0xff;
+    ownsWindow = false;
+}
+
+// 02:4F3E (effect 13): monster wC985 takes the picture of monster wC9D6 behind a dissolving mask.
+AnimTask BattleAnim::swapPicture() {
+    co_await wait(1);                                  // 02:500C with hl = 52FE + $3E
+    for (int i = 0; i < 16; i++) mem_[uint16_t(0xde40 + i)] = mem_[uint16_t(0xde50 + i)] = rb(uint16_t(0x533c + i));
+    copy(0xde40, 0x8000, 0x20);
+    auto rect = [&](uint8_t slot) {                    // 02:529F
+        const uint8_t v = mem_[uint16_t(0xcc51 + slot)];
+        mem_[0xde17] = uint8_t((v >> 4) + 1);
+        mem_[0xde18] = uint8_t((v & 15) + 1);
+        mem_[0xde19] = mem_[uint16_t(0xcc41 + slot * 2)];
+        mem_[0xde1a] = mem_[uint16_t(0xcc42 + slot * 2)];
+    };
+    rect(uint8_t(mem_[0xc985] - 5));
+    {                                                  // 02:4FD0
+        const int b = mem_[0xde17], rows = int8_t(mem_[0xde18]) >> 1;
+        uint8_t y = uint8_t((mem_[0xde1a] + 2) * 8);
+        uint16_t o = kOam;
+        for (int c = rows; c > 0; c--, y = uint8_t(y + 16)) {
+            uint8_t x = uint8_t((mem_[0xde19] + 1) * 8);
+            for (int k = 0; k < b; k++, x = uint8_t(x + 8)) {
+                mem_[o++] = y; mem_[o++] = x; mem_[o++] = 0; mem_[o++] = (c & 1) ? 0 : 0x40;
+            }
+        }
+    }
+    copy(0xde17, 0xde1b, 4);
+    rect(uint8_t(mem_[0xc9d6] - 5));
+    {                                                  // 02:4F7B: target's map rect -> source's
+        const int w = mem_[0xde1b], h = mem_[0xde1c];
+        uint16_t src = uint16_t(0x9800 + mem_[0xde1d] + mem_[0xde1e] * 32);
+        uint16_t dst = uint16_t(0x9800 + mem_[0xde19] + mem_[0xde1a] * 32);
+        for (int r = 0; r < h; r++, src = uint16_t(src + 32), dst = uint16_t(dst + 32))
+            copy(dst, src, w);
+    }
+    for (int k = 7; k > 0; k--) {
+        co_await wait(1);
+        const uint16_t p = uint16_t(0x537e + ((k - 1) & 7) * 16);
+        for (int i = 0; i < 16; i++) mem_[uint16_t(0xde40 + i)] = mem_[uint16_t(0xde50 + i)] = rb(uint16_t(p + i));
+        copy(0xde40, 0x8000, 0x20);
+        co_await wait(3);
+    }
+    clearOam();
+}
+
+// 0E:7DBF (effect 14): something thrown onto the monsters - a 16x16 object (0E:6CCF) bouncing
+// in from the right, or for a big monster a larger one (0E:7E86) dropping with the window
+// shaking. Both draw over the pictures' tiles; the battle redraws them afterwards.
+AnimTask BattleAnim::thrown() {
+    const uint8_t id = mem_[0xc91b];
+    bool big = false;
+    if (id < 0x78) {
+        const uint8_t v = mem_[uint16_t(0xcc51 + uint8_t(mem_[0xc9d6] - 5))];
+        big = (v & 0x57) >= 0x57;
+    }
+    ownsWindow = true;
+    if (!big) {
+        co_await wait(1);
+        mem_[kSCY] = 0xc0;
+        mem_[kSCX] = 0x28;
+        const uint16_t src = uint16_t(0x6ccf + (id >= 0x77 ? 0 : 0x40));
+        for (int i = 0; i < 0x40; i++) mem_[uint16_t(0x9000 + i)] = rom_.b(0x0e, uint16_t(src + i));
+        co_await wait(1);
+        mem_[0x9889] = 0; mem_[0x988a] = 2; mem_[0x98a9] = 1; mem_[0x98aa] = 3;
+        uint16_t t = 0x7e1f;
+        do {
+            co_await wait(3);
+            mem_[kSCY] = rom_.b(0x0e, t++);
+            mem_[kSCX] = uint8_t(mem_[kSCX] - 4);
+        } while (mem_[kSCX]);
+    } else {
+        mem_[kSCY] = 0x40;
+        for (int i = 0; i < 0xe0; i++) mem_[uint16_t(0x9000 + i)] = rom_.b(0x0e, uint16_t(0x7e86 + i));
+        maskMap(0x0e, 0x7e56, 16);
+        uint16_t t = 0x7e66;
+        for (int b = 0x10; b > 0; b--) {
+            co_await wait(3);
+            mem_[kSCY] = rom_.b(0x0e, t++);
+            mem_[0xff4a] = rom_.b(0x0e, t++);
+            if (b == 6) sound(0x10);
+        }
+    }
+    ownsWindow = false;
+    restoreBg = true;
 }
 
 // ---- spells ----
@@ -839,7 +1053,10 @@ AnimTask BattleAnim::effect(int id) {
     case 0x07: case 0x08: case 0x09: case 0x0c: case 0x0d: co_await rain(id); co_return;
     case 0x0a: co_await sparks(); co_return;
     case 0x0e: co_await bgFlash(); co_return;
+    case 0x0b: co_await vortex(); co_return;
     case 0x0f: co_await tilePatch(); co_return;
+    case 0x13: co_await swapPicture(); co_return;
+    case 0x14: co_await thrown(); co_return;
     case 0x10: co_await damage(false); co_return;
     case 0x11: co_await damage(true); co_return;
     case 0x12: co_await death(); co_return;
@@ -851,8 +1068,7 @@ AnimTask BattleAnim::effect(int id) {
     case 0x16: co_await partyRowClear(); co_return;
     case 0x17: statusMask(); co_return;
     default:
-        // Not translated yet: 48C6 (B, a window / BG-map zoom), 4F3E (13, a monster takes
-        // another's picture), 0E:7DBF (14). A short flash of the monsters stands in for them.
+        // Ids past the table (02:4364 has $18 entries) - never used by the game.
         if (std::find(unknownIds.begin(), unknownIds.end(), id) == unknownIds.end()) unknownIds.push_back(id);
         if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM effect %02X not translated\n", id);
         for (int e = 16; e > 0; e--) {

@@ -66,6 +66,8 @@ public:
     // change SCX / SCY / BGP part-way down the screen by waiting for LY.
     uint8_t reg(int line, uint16_t r) const;
     bool blank = false;                      // LCD off this frame (02:43C8)
+    bool ownsWindow = false;                 // the routine drives the window (map $9C00, WX/WY)
+    bool restoreBg = false;                  // set after effect $14 (it overwrote the pictures)
 
     // 0B:7DCA with a=2 (via 0C:6001): the members' battle sprites into OBJ tiles $6C+.
     void loadMemberTiles(const std::function<int(int)>& spritePage);
@@ -131,6 +133,12 @@ private:
     AnimTask death1();                            // 02:5055
     AnimTask death3();                            // 02:5167
     AnimTask flashLines(uint16_t table, int idx); // 02:51DE
+    AnimTask death2();                            // 02:50ED
+    AnimTask vortex();                            // 02:48C6 (effect B)
+    void vortexLines(uint16_t table, int start, int n, uint8_t bgp);   // 02:498C
+    AnimTask swapPicture();                       // 02:4F3E (effect 13)
+    AnimTask thrown();                            // 0E:7DBF (effect 14)
+    void maskMap(int bank, uint16_t mask, int bytes);   // 0E:7D7E
 
     const Rom& rom_;
     Mem& mem_;
