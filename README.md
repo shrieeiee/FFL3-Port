@@ -54,8 +54,9 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
   real game, statement for statement.
 - Talent / Magic / Item: lists, usability, MP checks and target cursor rules from the
   original menu code (one ally / whole party / one enemy / an enemy group).
-- Not yet: the real "Auto set" mode (Auto = everyone attacks), what happens after a wipe
-  (the port goes back to the start), MP cost shown in the Magic list.
+- Auto Set (0B:5F2F): members picked there are flagged (record bit 7), show "Auto" and keep
+  last round's command. A wipe in a random-battle area asks "Fight again?" (0F:7F8F): Yes
+  retries with the gold etc. as they were (wC6E0 from wDD00), No goes back to the title.
 
 **Milestone 7 – the rest of the game loop** ✅
 - Chests (item from 03:762A, "Received X." / "Empty", opened chests stay open)
@@ -138,8 +139,7 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Debug: `FFL3_FORCEFX=id` plays a sprite script on the next attack, `FFL3_FORCEEFFECT=id`
   (+ `FFL3_POKE=addr=val,...`) an effect, `FFL3_DEATHSTYLE=n` a death style.
 
-Not yet: event $10 A/C/F/5/8 and some $12 effects, the battle "Auto set" mode, animated water
-tiles. The last prologue walk on the Talon's map is placed at the
+Not yet: event $10 A/C/F/5/8 and some $12 effects, animated water tiles. The last prologue walk on the Talon's map is placed at the
 game's hand-over spot rather than walked exactly.
 
 ## Building

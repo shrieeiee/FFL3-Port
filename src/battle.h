@@ -58,7 +58,7 @@ struct BattleView {
 
 class Battle {
 public:
-    enum class Result { None, Won, Lost, Ran };
+    enum class Result { None, Won, Lost, Ran, GameOver };   // GameOver: "Fight again?" No (back to the title)
     static constexpr int kCursor = 0x20;     // OBJ tiles in battle VRAM (03:5430 / 03:57B0)
     static constexpr int kBracket = 0x24;
 
@@ -81,7 +81,7 @@ public:
     std::vector<uint16_t> unknownNatives;    // natives not handled yet (logged, skipped)
 
 private:
-    enum class State { Intro, Vm, FightMenu, Command, List, Target, Message, Wait, Done };
+    enum class State { Intro, Vm, FightMenu, Command, List, Target, Message, Wait, Retry, AutoSet, Done };
 
     uint8_t m(uint16_t a) const { return vm_.mem[a]; }
     int word(uint16_t a) const { return vm_.mem[a] | vm_.mem[uint16_t(a + 1)] << 8; }
@@ -115,6 +115,10 @@ private:
     bool startAnim(uint16_t entry);          // true: finished at once
     void hidePartyRow();
     void clearDeadPictures();
+    void reviveParty();
+    bool needsCommand(int i) const;
+    bool onAuto(int i) const;
+    void finishGuestAndRun();
     Formation form_;
     EnemyLayout layout_;
     std::vector<Monster> groups_;

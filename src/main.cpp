@@ -220,6 +220,7 @@ int main(int argc, char** argv) {
         }
         ctx.vehicle = field.vehicle();
         ctx.area = field.encounterArea();
+        if (const char* a = std::getenv("FFL3_AREA")) ctx.area = std::atoi(a);   // debug
         battle = std::make_unique<Battle>(rom, battleRam, party, ctx, hffca, battleSeed++ * 2654435761u);
         battle->playSfx = [&](int id) { sndSfx(id); };
         sndMusic(0);                                    // 00:10D7 stop the field music,
@@ -230,9 +231,11 @@ int main(int argc, char** argv) {
         field.setLastEvent(b);
     };
     // After a battle: back to the field. (Random fights you lose are retried by the battle itself.)
+    bool gameOver = false;                              // "Fight again?" No: back to the title (00:0200)
     auto finishBattle = [&] {
         const Battle::Result r = battle->result();
         battle.reset();
+        if (r == Battle::Result::GameOver) { gameOver = true; field.setLastEvent("game over"); return; }
         if (r == Battle::Result::Lost) {               // story fights you can lose: carry on at 1 HP
             field.setLastEvent("party defeated");
         } else {
@@ -901,6 +904,7 @@ int main(int argc, char** argv) {
                 in.left = left && !leftPrev; in.right = right && !rightPrev;
                 battle->tick(in);
                 if (battle->finished()) finishBattle();
+                if (gameOver) { gameOver = false; title = std::make_unique<TitleScreen>(rom); opening = 1; }
             } else if (console) {
                 ConsoleInput in;
                 in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;

@@ -212,15 +212,27 @@ bool Battle::native(uint16_t addr) {
         return false;
     case 0x1d77:                                       // after a defeat (0B:5CDF)
         vm_.mem[0xce88] = 2;
-        if (vm_.mem[0xceda] != 0xff)                   // no retry: fallen members get up with 1 HP
-            for (int i = 0; i < 5; i++) {
-                const uint16_t r = uint16_t(0xc500 + i * 0x60);
-                if ((vm_.mem[uint16_t(r + 1)] & 0x80) || !(vm_.mem[uint16_t(r + 0x10)] | vm_.mem[uint16_t(r + 0x11)])) {
-                    vm_.mem[uint16_t(r + 0x10)] = 1; vm_.mem[uint16_t(r + 0x11)] = 0;
-                }
-                vm_.mem[uint16_t(r + 1)] &= 0x40;
+        if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "1D77 ceda=%02X cc59=%02X\n", vm_.mem[0xceda], vm_.mem[0xcc59]);
+        if (vm_.mem[0xceda] != 0xff) { reviveParty(); return true; }   // story fight: carry on
+        if (vm_.mem[0xcc59] == 0xc2) {                 // this one ends the game: 2 s, then the title
+            timer_ = 120;
+            state_ = State::Retry;
+            cursor_ = -1;
+            return false;
+        }
+        {                                              // 0F:7F8F: "Fight again? Yes / No" (09:74FB)
+            lines_.clear(); cur_.clear();
+            Glyphs l;
+            for (uint16_t p = 0x74fb;; p++) {
+                const uint8_t c = rom_.b(9, p);
+                if (c == 0x00) { lines_.push_back(l); break; }
+                if (c == 0x06) { lines_.push_back(l); l.clear(); continue; }
+                l.push_back(c);
             }
-        return true;
+        }
+        state_ = State::Retry;
+        cursor_ = 0;
+        return false;
     case 0x5fb7:                                       // print battle message wCE8D/8E
         showMessage();
         state_ = State::Message;
@@ -236,6 +248,17 @@ bool Battle::native(uint16_t addr) {
     default:
         if (std::find(unknownNatives.begin(), unknownNatives.end(), addr) == unknownNatives.end()) unknownNatives.push_back(addr);
         return true;
+    }
+}
+
+// 0B:5CFF: everyone down gets up with 1 HP, statuses cleared but bit 6.
+void Battle::reviveParty() {
+    for (int i = 0; i < 5; i++) {
+        const uint16_t r = uint16_t(0xc500 + i * 0x60);
+        if ((vm_.mem[uint16_t(r + 1)] & 0x80) || !(vm_.mem[uint16_t(r + 0x10)] | vm_.mem[uint16_t(r + 0x11)])) {
+            vm_.mem[uint16_t(r + 0x10)] = 1; vm_.mem[uint16_t(r + 0x11)] = 0;
+        }
+        vm_.mem[uint16_t(r + 1)] &= 0x40;
     }
 }
 
@@ -458,30 +481,52 @@ void Battle::tick(const BattleInput& in) {
         }
         if (in.a || --timer_ <= 0) runVm();
         return;
+    case State::Retry:
+        if (cursor_ < 0) {                             // 0B:5CF2: wait 120 frames, reset
+            if (--timer_ <= 0) { result_ = Result::GameOver; state_ = State::Done; }
+            return;
+        }
+        if (in.up || in.down) cursor_ ^= 1;
+        if (!in.a) return;
+        if (cursor_ == 1) { result_ = Result::GameOver; state_ = State::Done; return; }   // 00:0200
+        std::copy(vm_.mem.begin() + 0xdd00, vm_.mem.begin() + 0xdd60, vm_.mem.begin() + 0xc6e0);   // 0F:7DC9
+        reviveParty();
+        lines_.clear(); cur_.clear();
+        runVm();
+        return;
     case State::FightMenu:
         if (in.up) cursor_ = (cursor_ + 2) % 3;
         if (in.down) cursor_ = (cursor_ + 1) % 3;
         if (!in.a) return;
         if (cursor_ == 0) {
             member_ = 0;
-            while (member_ < 4 && !memberAlive(member_)) member_++;
+            while (member_ < 4 && !needsCommand(member_)) member_++;
             for (int i = 0; i < 5; i++) if (!memberAlive(i)) setCmd(i, 0xff);
+            if (member_ >= 4) { finishGuestAndRun(); return; }   // everyone on auto
             state_ = State::Command;
             cursor_ = 0;
         } else if (cursor_ == 1) {
             finishCommands(true);
-        } else {                                       // Auto: everyone attacks the first group
-            const auto g = aliveGroups();
-            for (int i = 0; i < 5; i++) setCmd(i, memberAlive(i) && !g.empty() ? firstSlot(g[0]) : 0xff);
-            finishCommands(false);
+        } else {                                       // Auto Set (0B:5F2F): pick members to put on auto
+            state_ = State::AutoSet;
+            target_ = 1;                                   // wCE1C = 1
+            kind_ = 0x08;
         }
+        return;
+    case State::AutoSet:
+        if (in.b) { state_ = State::FightMenu; cursor_ = 0; return; }   // the menu starts over at Fight
+        if (in.left) moveTarget(-1, 0);
+        if (in.right) moveTarget(1, 0);
+        if (in.up) moveTarget(0, -1);
+        if (in.down) moveTarget(0, 1);
+        if (in.a && target_ < 5) vm_.mem[size_t(0xc500 + target_ * 0x60)] ^= 0x80;   // record bit 7
         return;
     case State::Command:
         if (in.up) cursor_ = (cursor_ + 3) % 4;
         if (in.down) cursor_ = (cursor_ + 1) % 4;
         if (in.b) {
             int k = member_ - 1;
-            while (k >= 0 && !memberAlive(k)) k--;
+            while (k >= 0 && !needsCommand(k)) k--;
             if (k < 0) { state_ = State::FightMenu; cursor_ = 0; }
             else { member_ = k; cmdSet_[k] = false; cursor_ = 0; }
             return;
@@ -625,8 +670,19 @@ void Battle::confirmTarget() {
     cmdSet_[member_] = true;
     cmdKind_[member_] = command_;
     int n = member_ + 1;
-    while (n < 4 && !memberAlive(n)) n++;
+    while (n < 4 && !needsCommand(n)) n++;
     if (n < 4) { member_ = n; state_ = State::Command; cursor_ = 0; return; }
+    finishGuestAndRun();
+}
+
+// A member the player picks a command for: alive, able to act, not on auto (0B:5C5A).
+bool Battle::needsCommand(int i) const {
+    return memberAlive(i) && !(m(uint16_t(0xc500 + i * 0x60)) & 0x80);
+}
+
+bool Battle::onAuto(int i) const { return i < 5 && (m(uint16_t(0xc500 + i * 0x60)) & 0x80); }
+
+void Battle::finishGuestAndRun() {
     if (memberAlive(4)) {                                 // the guest acts on its own
         for (size_t s = 0; s < layout_.slots.size(); s++)
             if (enemyAlive(int(s))) {
@@ -675,6 +731,10 @@ void Battle::statusPanel(BattleView& v, int hideCol) const {
         if (i < 4 && cmdSet_[i]) {
             static const char* kShort[4] = {"Weap", "Tale", "Magi", "Item"};
             putText(v.win, x0 + 6, y0 + 1, G(kShort[cmdKind_[i] & 3]));
+        } else if (onAuto(i) && memberAlive(i)) {        // 0B:660D: "Auto" (09:74A7)
+            Glyphs a;
+            for (uint16_t p = 0x74a7; rom_.b(9, p) != 0xff && rom_.b(9, p) != 0x00 && a.size() < 4; p++) a.push_back(rom_.b(9, p));
+            putText(v.win, x0 + 6, y0 + 1, a);
         } else {
             v.win[size_t(y0 * 20 + x0 + 6)] = 0xf1;
             putNum(v.win, x0 + 7, y0, word(uint16_t(r + 0x12)), 3);
@@ -770,6 +830,27 @@ BattleView Battle::view() const {
         if (!list_.empty()) v.objs.push_back({8, 64 + 16 + (listCursor_ - first) * 16, kCursor});
         break;
     }
+    case State::AutoSet: {                             // 0B:5F2F: "Auto Set" over member 0's corner
+        v.wy = 64;
+        statusPanel(v, -1);
+        v.objs.erase(std::remove_if(v.objs.begin(), v.objs.end(), [](const BattleObj& o) { return o.member == 0; }), v.objs.end());
+        box(v.win, 0, 0, 10, 4);
+        putText(v.win, 1, 2, G("Auto Set"));
+        if (target_ < 5) {
+            const int i = target_;
+            const int px = i == 4 ? 8 : (i & 1) ? 80 : 8, py = 64 + 8 + (i == 4 ? 48 : (i >> 1) * 24);
+            brackets(px, py - 8, px + 16, py + 24);
+        }
+        break;
+    }
+    case State::Retry:
+        v.wy = 88;
+        box(v.win, 0, 0, 20, 7);
+        if (cursor_ >= 0) {
+            for (size_t i = 0; i < lines_.size() && i < 2; i++) putText(v.win, 1, 2 + int(i) * 2, lines_[i]);
+            v.objs.push_back({104, 104 + cursor_ * 16, kCursor});
+        }
+        break;
     case State::Vm: case State::Message: case State::Wait: {
         v.wy = 88;
         box(v.win, 0, 0, 20, 7);
