@@ -97,13 +97,18 @@ Expected ROM: `Final Fantasy Legend III (U)`, 256 KB, MD5 `db156bc96b528996ce1bf
 - Shops and inns redone with the game's own screens and texts, pixel-identical to the real
   thing apart from the party's walk animation: Exit / Buy / Sell / Mix, Yes / No boxes,
   both kinds of Mix (Light + Dark stones for gear; two elements for a spell), inns $40-$4F.
+- Field menu redone to the game's screens (layouts read from the real game's window tiles):
+  Item (mark, swap, use), Magic, Talent, Status (class, NEXT / EXP, all stats), Equip (two
+  columns of slots, the bag filtered by slot), Auto (record +0 bit 7), Save (three files).
+  Guessed, not checked: status names for anything but Good, classes other than Human /
+  Mutant, which of record +$3D-3F is Evade / M.Def / M.Evade; the Talent screen's
+  resistance marks and the item list's bin aren't in.
 - Townsfolk wander (01:4F66 / 5060): move types 0-3 and $1B-$1E take a random step about
   once a second at half walking speed, blocked by walls, event blocks and people.
 - Map event blocks: damage floors ($20), status-cure ($21) and healing ($22) spots, the
   slide-and-exit $08/$09.
 
-Not yet: event $10 A/C/F/5/8 and most $12 effects, the shop / menu screens' exact
-original layouts (the port's own for now), the battle
+Not yet: event $10 A/C/F/5/8 and most $12 effects, the battle
 "Auto set" mode, battle animations, the opening sequence.
 
 ## Building

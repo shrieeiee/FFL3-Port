@@ -25,6 +25,7 @@ check "Talon round trip: out, back on board (game)" "map 0B layout 0F gfx 21 spr
 # Every NPC text must parse exactly up to the next one (validates control-code lengths).
 check "shop: Buy, pick, Yes (01:7187)" "shop open, gold 560" --shop 32 --walk AAA
 check "inn: Stay costs the missing HP + MP (01:7731)" "shop open, gold 683" --shop 40 --party-hp 5 --walk A
+check "field menu: Item, mark + use Cure on member 2 (09:521A)" "party: 5/50,5/5,s00 40/40,45/45,s00" --party-hp 5 --ram c6ff:c0,c700:02 --walk MAAADA
 check "Talon cockpit: Depart needs flag 5 (01:79B3)" "map 10 layout 04 gfx 04 sprites 04  16x16  player 5,16" --map 10 --pos 5,16 --walk UAA
 check "Talon: takes off from wC6E9 (01:63E6)" "map 01 layout 1C gfx 17 sprites 19  32x32  player 21,21  npcs 1  [took off]" --flag 5 --map 10 --pos 5,16 --walk UAA
 check "Talon: flies over mountains (mode 6)" "player 25,25" --flag 5 --flag 3a --map 10 --pos 5,16 --walk UAARRRRDDDD

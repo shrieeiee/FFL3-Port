@@ -351,7 +351,16 @@ int main(int argc, char** argv) {
         console.reset();
     };
     auto openMenu = [&] {
-        menu = std::make_unique<FieldMenu>(rom, battleRam, party, [&] { return saveGame("ffl3.sav"); });
+        static const char* files[3] = {"ffl3.sav", "ffl3-2.sav", "ffl3-3.sav"};
+        menu = std::make_unique<FieldMenu>(rom, battleRam, party,
+            [&](int slot) { return saveGame(files[slot]); },
+            [](int slot, CharRecord& leader) {               // the file's first party record
+                FILE* f = std::fopen(files[slot], "rb");
+                if (!f) return false;
+                const bool ok = !std::fseek(f, 8 + 5 + 64, SEEK_SET) && std::fread(leader.raw.data(), 1, 0x60, f) == 0x60;
+                std::fclose(f);
+                return ok;
+            });
         menu->playSfx = [&](int id) { sndSfx(id); };
     };
     auto chest = [&](int slot, const MapObject& o) {           // 00:09D7
