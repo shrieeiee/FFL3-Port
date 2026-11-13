@@ -13,6 +13,7 @@
 #include "console.h"
 #include "opening.h"
 #include "bugreport.h"
+#include "avi.h"
 #include <filesystem>
 #include <ctime>
 #include <csignal>
@@ -29,6 +30,8 @@
 using namespace ffl3;
 
 namespace {
+
+ffl3::AudioTap* g_tap = nullptr;                        // sound for the video recorder (audio thread)
 
 struct Palette { const char* name; uint32_t c[4]; };
 const Palette kPalettes[] = {
@@ -814,7 +817,10 @@ int main(int argc, char** argv) {
         sound = std::make_unique<SoundSystem>(rom, 48000);
         SDL_AudioSpec want{}, have{};
         want.freq = 48000; want.format = AUDIO_F32SYS; want.channels = 2; want.samples = 1024;
-        want.callback = [](void* u, Uint8* buf, int len) { static_cast<SoundSystem*>(u)->render(reinterpret_cast<float*>(buf), len / 8); };
+        want.callback = [](void* u, Uint8* buf, int len) {
+            static_cast<SoundSystem*>(u)->render(reinterpret_cast<float*>(buf), len / 8);
+            if (g_tap) g_tap->push(reinterpret_cast<const float*>(buf), len / 8);
+        };
         want.userdata = sound.get();
         adev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
         if (adev) {
@@ -836,6 +842,14 @@ int main(int argc, char** argv) {
 #endif
     // ---- tester support: input / event log, F12 bug reports, crash reports, F10 commands ----
     BugLog buglog;
+    // Video: F8 records to captures/; the last 30 s always go into F12 reports as clip.avi.
+    AudioTap tap;
+    g_tap = &tap;
+    const int audioRate = 48000;
+    ClipBuffer clip(30);
+    Recorder rec;
+    std::string recPath;
+    int clipW = 0;
     std::string toast;                                  // notice across the top of the screen
     int toastFrames = 0;
     auto notify = [&](const std::string& msg, int frames = 300) { toast = msg; toastFrames = frames; buglog.event("NOTICE " + msg); };
@@ -858,8 +872,10 @@ int main(int argc, char** argv) {
         s += "\nlast event: " + field.lastEvent() + "\n";
         return s;
     };
+    auto palRgb = [&] { std::array<uint32_t, 4> p{}; for (int i = 0; i < 4; i++) p[size_t(i)] = kPalettes[pal].c[i] & 0xffffff; return p; };
     auto writeReport = [&](bool crash) {
         const std::string dir = newReportDir(exeDir);
+        if (clipW) clip.write((std::filesystem::path(dir) / "clip.avi").string(), clipW, frame.h, palRgb(), audioRate);
         buglog.write(dir, infoText() + (crash ? "CRASH\n" : ""));
         saveBmp(argb, frame.w, frame.h, (std::filesystem::path(dir) / "screen.bmp").string().c_str());
         if (!crash) saveGame((std::filesystem::path(dir) / "game.sav").string().c_str());
@@ -884,13 +900,103 @@ int main(int argc, char** argv) {
         if (k == "fx") { if (n >= 2) SDL_setenv("FFL3_FORCEFX", line.substr(3).c_str(), 1); else SDL_setenv("FFL3_FORCEFX", "", 1); return std::string("next attack plays sprite script ") + line.substr(2); }
         if (k == "effect" && n >= 2) { SDL_setenv("FFL3_FORCEEFFECT", line.substr(7).c_str(), 1); return std::string("next attack plays effect ") + line.substr(7); }
         if (k == "death" && n >= 2) { SDL_setenv("FFL3_DEATHSTYLE", line.substr(6).c_str(), 1); return std::string("monster deaths use style ") + line.substr(6); }
-        if (k == "normal") { SDL_setenv("FFL3_FORCEFX", "", 1); SDL_setenv("FFL3_FORCEEFFECT", "", 1); SDL_setenv("FFL3_DEATHSTYLE", "", 1); return std::string("animations back to normal"); }
+        if (k == "normal") {
+            for (const char* v : {"FFL3_FORCEFX", "FFL3_FORCEEFFECT", "FFL3_DEATHSTYLE", "FFL3_AREA", "FFL3_POKE"}) SDL_setenv(v, "", 1);
+            return std::string("test settings back to normal");
+        }
         if (k == "heal") {
             for (auto& r : party) { r.raw[0x10] = r.raw[0x12]; r.raw[0x11] = r.raw[0x13]; r.raw[0x14] = r.raw[0x16]; r.raw[0x15] = r.raw[0x17]; r.raw[1] &= 0x40; }
             return std::string("party healed");
         }
         if (k == "flag" && n >= 3) { flags.event.set(a & 0xff, b != 0); return std::string("flag set"); }
-        return std::string("commands: battle XX | map XX [row col] | fx XX | effect XX | death N | normal | heal | flag XX 0/1");
+        if (k == "area") { SDL_setenv("FFL3_AREA", n >= 2 ? line.substr(5).c_str() : "", 1); return std::string("battles count as encounter area ") + line.substr(4); }
+        if (k == "hp1") { for (auto& r : party) { r.raw[0x10] = 1; r.raw[0x11] = 0; } return std::string("party at 1 HP"); }
+        if (k == "music" && n >= 2) { sndMusic(int(a)); return std::string("music ") + line.substr(6); }
+        if (k == "sfx" && n >= 2) { sndSfx(int(a)); return std::string("sound effect ") + line.substr(4); }
+        if (k == "event" && n >= 3) {                       // event XX YY (hex): a field event command
+            unsigned p2 = 0;
+            std::sscanf(line.c_str(), "%*s %x %x", &a, &p2);
+            field.runEventCommand(int(a), int(p2));
+            return std::string("event ") + line.substr(6);
+        }
+        if (k == "poke" && n >= 2) { SDL_setenv("FFL3_POKE", line.substr(5).c_str(), 1); return std::string("battle pokes ") + line.substr(5); }
+        return std::string("commands: battle XX | map XX [row col] | fx XX | effect XX | death N | area N | hp1 | poke A=V | normal | heal | flag XX 0/1 | music XX | sfx XX | event XX YY");
+    };
+    // ---- F7: test mode - every bit that needs checking, set up with one key ----
+    struct TestItem { const char* name; const char* setup; const char* check; bool resetAfterBattle; };
+    static const TestItem kTests[] = {
+        {"Opening", "TITLE", "Title, story crawl (water shimmer), naming, simulator battle, cutscenes", false},
+        {"Water anim", "map 10 22 12", "Water flows, waterfall moves, like the real game", false},
+        {"Talon deck", "map 0b 26 7", "Walking, doors, people, cockpit console", false},
+        {"Flash event", "event 12 03", "Screen flashes white 4 times with a sound", false},
+        {"Normal fight", "battle 00", "Party row walks; weapon sprites; numbers bounce; death dissolve", false},
+        {"Auto Set", "battle 00", "Fight menu > Auto: toggle a member; they show Auto and skip choosing", false},
+        {"Fight again?", "area 1;hp1;battle 30", "Lose: Fight again? Yes retries, No goes to the title", true},
+        {"Boss fight", "battle da", "Boss picture, music, its death", false},
+        {"Spell fire", "fx 6c;battle 00", "First attack plays the fire effect", true},
+        {"Spell ripple", "fx 6b;battle 00", "Monsters ripple side to side", true},
+        {"Spell gather", "fx 6a;battle 00", "Sparks pulled into the monsters, they vanish and return", true},
+        {"Spell bubbles", "fx 6d;battle 00", "Rising bubbles", true},
+        {"Spell rocks", "fx 6e;battle 00", "Rocks fall diagonally", true},
+        {"Spell orbs", "fx 68;battle 00", "Orbs scatter", true},
+        {"Spell clouds", "fx 27;battle 00", "Clouds drift", true},
+        {"Spell shimmer", "fx 44;battle 00", "Monsters shimmer and flicker, sparks rise", true},
+        {"Spell vortex", "fx 28;battle 00", "Whirling disc, screen goes pale, box comes back", true},
+        {"Death dissolve", "death 0;battle 00", "Killed monster dissolves in a dotted mask", true},
+        {"Death lines", "death 1;battle 00", "Picture drops out in horizontal lines", true},
+        {"Death 2nd form", "death 2;battle 00", "Boss lifts off, new form shudders in, flashes", true},
+        {"Death melt", "death 3;battle 00", "Bounce, flashes, melts down tile by tile", true},
+        {"Picture swap", "effect 13;poke c985=5,c9d6=7;battle 00", "A monster takes another's picture", true},
+        {"Thrown object", "effect 14;poke c91b=10,c9d6=5;battle 00", "Object scrolls in over the monsters", true},
+        {"Sound test", "music 01", "F10 'music XX' / 'sfx XX' for the others", false},
+        {"Saving", "", "Save in the menu, quit, Continue from the title", false},
+    };
+    constexpr int kNumTests = int(sizeof(kTests) / sizeof(kTests[0]));
+    std::vector<char> testMark(size_t(kNumTests), ' ');      // ' ', 'P' passed, 'B' bug
+    {                                                         // results from earlier sessions
+        if (FILE* f = std::fopen((std::filesystem::path(exeDir) / "test_results.txt").string().c_str(), "r")) {
+            char ln[256];
+            while (std::fgets(ln, sizeof ln, f))
+                for (int i = 0; i < kNumTests; i++) {
+                    const std::string l = ln;
+                    if (l.find(std::string("| ") + kTests[i].name + "\n") != std::string::npos ||
+                        l.find(std::string("| ") + kTests[i].name + "\r") != std::string::npos)
+                        testMark[size_t(i)] = l.find("PASS") != std::string::npos ? 'P' : 'B';
+                }
+            std::fclose(f);
+        }
+    }
+    bool testMenu = false, resetAfterBattle = false, reportNextFrame = false;
+    int testCursor = 0;
+    auto markTest = [&](int i, bool pass) {
+        testMark[size_t(i)] = pass ? 'P' : 'B';
+        if (FILE* f = std::fopen((std::filesystem::path(exeDir) / "test_results.txt").string().c_str(), "a")) {
+            char t[32];
+            const std::time_t now = std::time(nullptr);
+            std::strftime(t, sizeof t, "%Y-%m-%d %H:%M", std::localtime(&now));
+            std::fprintf(f, "%s %s %s | %s\n", t, FFL3_VERSION, pass ? "PASS" : "BUG ", kTests[i].name);
+            std::fclose(f);
+        }
+        buglog.event(std::string(pass ? "TEST PASS " : "TEST BUG ") + kTests[i].name);
+    };
+    std::function<void(const std::string&)> runSetup = [&](const std::string& setup) {
+        runCommand("normal");
+        size_t at = 0;
+        while (at <= setup.size() && !setup.empty()) {
+            const size_t semi = setup.find(';', at);
+            const std::string c = setup.substr(at, semi == std::string::npos ? std::string::npos : semi - at);
+            if (c == "TITLE") {
+                battle.reset(); shop.reset(); menu.reset(); console.reset(); text.close();
+                title = std::make_unique<TitleScreen>(rom);
+                opening = 1;
+                sndMusic(6);
+            } else if (!c.empty()) {
+                if (opening) { opening = 0; title.reset(); naming.reset(); }
+                runCommand(c);
+            }
+            if (semi == std::string::npos) break;
+            at = semi + 1;
+        }
     };
     std::string lastTitle;
     bool running = true;
@@ -901,6 +1007,30 @@ int main(int argc, char** argv) {
 
     while (running) {
         SDL_Event e;
+        if (const char* inj = std::getenv("FFL3_INJECT")) {      // tests: "frame:Key frame:Key ..." key presses
+            static std::vector<std::pair<uint64_t, SDL_Keycode>> evs;
+            static bool parsed = false;
+            if (!parsed) {
+                parsed = true;
+                std::string all = inj;
+                for (size_t at = 0; at < all.size();) {
+                    size_t sp = all.find(' ', at);
+                    const std::string tok = all.substr(at, sp == std::string::npos ? std::string::npos : sp - at);
+                    const size_t c = tok.find(':');
+                    if (c != std::string::npos) evs.push_back({std::stoull(tok.substr(0, c)), SDL_GetKeyFromName(tok.substr(c + 1).c_str())});
+                    if (sp == std::string::npos) break;
+                    at = sp + 1;
+                }
+            }
+            for (auto& [fr, key] : evs)
+                if (fr == buglog.frameNo() && key != SDLK_UNKNOWN) {
+                    SDL_Event ev{};
+                    ev.type = SDL_KEYDOWN;
+                    ev.key.keysym.sym = key;
+                    SDL_PushEvent(&ev);
+                    key = SDLK_UNKNOWN;                          // once
+                }
+        }
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
             if (prompt) {                                        // typing a tester command
@@ -916,7 +1046,31 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (e.type != SDL_KEYDOWN) continue;
+            if (testMenu) {
+                switch (e.key.keysym.sym) {
+                case SDLK_UP: case SDLK_w: testCursor = (testCursor + kNumTests - 1) % kNumTests; break;
+                case SDLK_DOWN: case SDLK_s: testCursor = (testCursor + 1) % kNumTests; break;
+                case SDLK_PAGEUP: testCursor = std::max(0, testCursor - 10); break;
+                case SDLK_PAGEDOWN: testCursor = std::min(kNumTests - 1, testCursor + 10); break;
+                case SDLK_RIGHT: case SDLK_d: markTest(testCursor, true); break;
+                case SDLK_LEFT: case SDLK_a:                     // bug: report from the game screen
+                    markTest(testCursor, false);
+                    testMenu = false;
+                    reportNextFrame = true;
+                    break;
+                case SDLK_z: case SDLK_SPACE: case SDLK_RETURN:
+                    testMenu = false;
+                    if (runSetup) runSetup(kTests[testCursor].setup);
+                    resetAfterBattle = kTests[testCursor].resetAfterBattle;
+                    notify(std::string("Check: ") + kTests[testCursor].check, 600);
+                    break;
+                case SDLK_F7: case SDLK_x: case SDLK_ESCAPE: testMenu = false; break;
+                default: break;
+                }
+                continue;
+            }
             switch (e.key.keysym.sym) {
+            case SDLK_F7: testMenu = true; continue;
             case SDLK_ESCAPE: running = false; break;
             case SDLK_PAGEDOWN: case SDLK_RIGHTBRACKET: case SDLK_PAGEUP: case SDLK_LEFTBRACKET: {
                 const bool fwd = e.key.keysym.sym == SDLK_PAGEDOWN || e.key.keysym.sym == SDLK_RIGHTBRACKET;
@@ -952,6 +1106,22 @@ int main(int argc, char** argv) {
             case SDLK_F10:
                 prompt = true; promptLine.clear(); SDL_StartTextInput();
                 break;
+            case SDLK_F8:                                        // video recording on / off
+                if (rec.isOpen()) {
+                    rec.close();
+                    notify("Recording saved: " + std::filesystem::path(recPath).filename().string(), 180);
+                } else {
+                    namespace fs = std::filesystem;
+                    std::error_code ec;
+                    fs::create_directories(fs::path(exeDir) / "captures", ec);
+                    char nm[64];
+                    const std::time_t t = std::time(nullptr);
+                    std::strftime(nm, sizeof nm, "ffl3-%Y%m%d-%H%M%S.avi", std::localtime(&t));
+                    recPath = (fs::path(exeDir) / "captures" / nm).string();
+                    if (rec.open(recPath, frame.w, frame.h, palRgb(), audioRate)) notify("Recording (F8 to stop)", 120);
+                    else notify("Could not start recording", 180);
+                }
+                break;
             default: break;
             }
         }
@@ -960,10 +1130,12 @@ int main(int argc, char** argv) {
         acc += double(now - last) / double(SDL_GetPerformanceFrequency());
         last = now;
         if (acc > 0.25) acc = 0.25;
+        int steps = 0;                                           // logic frames this time round (for capture)
         while (acc >= 1.0 / 60.0) {
             acc -= 1.0 / 60.0;
+            steps++;
             static const Uint8 kNoKeys[SDL_NUM_SCANCODES] = {};
-            const Uint8* k = prompt ? kNoKeys : SDL_GetKeyboardState(nullptr);   // typing a command: no game input
+            const Uint8* k = prompt || testMenu ? kNoKeys : SDL_GetKeyboardState(nullptr);   // typing / test menu: no game input
             int d = -1;
             if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = int(Dir::Down);
             else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = int(Dir::Up);
@@ -982,7 +1154,7 @@ int main(int argc, char** argv) {
                                   (d == int(Dir::Right) ? BugLog::Right : 0) | (k[SDL_SCANCODE_M] || k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT] ? BugLog::Menu : 0)));
             if (field.lastEvent() != lastLogged) { lastLogged = field.lastEvent(); if (!lastLogged.empty()) buglog.event(lastLogged); }
             if (toastFrames > 0 && --toastFrames == 0) toast.clear();
-            if (const char* tr = std::getenv("FFL3_SELFTEST"); tr && buglog.frameNo() == 120) {   // packaging check
+            if (const char* tr = std::getenv("FFL3_SELFTEST"); tr && buglog.frameNo() == uint64_t(std::getenv("FFL3_SELFTEST_AT") ? std::atoi(std::getenv("FFL3_SELFTEST_AT")) : 120)) {   // packaging check
                 std::printf("report: %s\n", writeReport(false).c_str());
                 if (std::string(tr) == "crash") std::raise(SIGSEGV);
                 running = false;
@@ -1019,7 +1191,7 @@ int main(int argc, char** argv) {
                 in.up = up && !upPrev; in.down = down && !downPrev;
                 in.left = left && !leftPrev; in.right = right && !rightPrev;
                 battle->tick(in);
-                if (battle->finished()) finishBattle();
+                if (battle->finished()) { finishBattle(); if (resetAfterBattle) { runCommand("normal"); resetAfterBattle = false; } }
                 if (gameOver) { gameOver = false; title = std::make_unique<TitleScreen>(rom); opening = 1; }
             } else if (console) {
                 ConsoleInput in;
@@ -1067,6 +1239,52 @@ int main(int argc, char** argv) {
             renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         }
+        if (testMenu) {                                          // F7 test mode list
+            std::vector<std::string> l = {"TEST MODE", "A set up, Right ok", "Left bug, B close", ""};
+            std::vector<std::string> wrap;                       // what to check, wrapped to the width
+            {
+                const size_t cols = size_t(frame.w / 8);
+                std::string cur;
+                std::string word;
+                const std::string txt = std::string(kTests[testCursor].check) + " ";
+                for (char ch : txt) {
+                    if (ch != ' ') { word += ch; continue; }
+                    if (!cur.empty() && cur.size() + 1 + word.size() > cols) { wrap.push_back(cur); cur.clear(); }
+                    cur += (cur.empty() ? "" : " ") + word;
+                    word.clear();
+                }
+                if (!cur.empty()) wrap.push_back(cur);
+            }
+            const int rows = frame.h / 8 - 5 - int(wrap.size());
+            const int first = std::clamp(testCursor - rows / 2, 0, std::max(0, kNumTests - rows));
+            for (int i = first; i < kNumTests && i < first + rows; i++)
+                l.push_back(std::string(i == testCursor ? "\x01" : "") + (testMark[size_t(i)] == 'P' ? "ok " : testMark[size_t(i)] == 'B' ? "BUG" : "   ") + kTests[i].name);
+            l.push_back("");
+            l.insert(l.end(), wrap.begin(), wrap.end());
+            renderLines(tiles, l, frame);
+            toArgb(frame, kPalettes[pal], nullptr, argb);
+        }
+        if (reportNextFrame && !testMenu && steps) {
+            reportNextFrame = false;
+            const std::string dir = writeReport(false);
+            notify("Bug report saved: " + std::filesystem::path(dir).filename().string() + " - add a note", 240);
+        }
+        if (steps) {                                             // capture: one video frame per logic frame
+            if (frame.w != clipW) {
+                clip.clear();
+                clipW = frame.w;
+                if (rec.isOpen()) { rec.close(); notify("Recording stopped (screen width changed)", 180); }
+            }
+            const std::vector<uint8_t> rle(frame.px.begin(), frame.px.end());   // raw; encoded when written
+            std::vector<int16_t> snd = tap.take();
+            if (rec.isOpen()) {
+                for (int i = 0; i < steps; i++) rec.frame(rle);
+                rec.audio(snd);
+                if (rec.bytes() > 1800ull << 20) { rec.close(); notify("Recording stopped at 1.8 GB - press F8 for a new file", 240); }
+            }
+            clip.add(rle, std::move(snd));
+            for (int i = 1; i < steps; i++) clip.add(rle, {});
+        }
         if (!tex || texW != frame.w) {
             if (tex) SDL_DestroyTexture(tex);
             tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, frame.w, frame.h);
@@ -1086,6 +1304,7 @@ int main(int argc, char** argv) {
                       debug ? " [collision]" : "", field.lastEvent().c_str());
         if (lastTitle != title) { SDL_SetWindowTitle(win, title); lastTitle = title; }
     }
+    g_tap = nullptr;
     if (adev) SDL_CloseAudioDevice(adev);
     if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);

@@ -24,7 +24,7 @@ if(NOT SDL2_FOUND)
     endif()
 endif()
 
-add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp src/console.cpp src/uitext.cpp src/opening.cpp src/battleanim.cpp src/fieldanim.cpp src/bugreport.cpp)
+add_library(ffl3core STATIC src/rom.cpp src/mapdata.cpp src/field.cpp src/render.cpp src/text.cpp src/battledata.cpp src/battle.cpp src/battlevm.cpp src/battlenatives.cpp src/shop.cpp src/menu.cpp src/sound.cpp src/console.cpp src/uitext.cpp src/opening.cpp src/battleanim.cpp src/fieldanim.cpp src/bugreport.cpp src/avi.cpp)
 target_include_directories(ffl3core PUBLIC src)
 # The version testers' bug reports carry: git describe, or "dev".
 execute_process(COMMAND git describe --always --dirty WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

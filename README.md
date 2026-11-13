@@ -149,9 +149,10 @@ game's hand-over spot rather than walked exactly.
 
 ## Testing
 
-`docs/TESTING.md` is the tester's guide: controls, F12 bug reports (screenshot, save, the last
-ten minutes of input and a game log in `bug_reports\`), crash reports, the F10 command line
-(`battle`, `map`, `fx`, `death`...) and a checklist.
+`docs/TESTING.md` is the tester's guide: the F7 test mode (every item to check, set up with one
+key, marked ok / bug), F8 video recording (AVI, RLE delta frames + PCM), F12 bug reports (the
+last 30 s as video, screenshot, save, ten minutes of input, a game log), crash reports, the
+F10 command line and a checklist. `tests/test_tester.py` drives it all with injected keys.
 
 ## Building
 

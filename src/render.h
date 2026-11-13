@@ -36,6 +36,7 @@ struct TileCache {
 void renderTextBox(const TextBox& tb, const TileCache& tc, const RenderOpts& o, Frame& out);
 
 void renderToast(const TileCache& tc, const std::string& msg, Frame& out);
+void renderLines(const TileCache& tc, const std::vector<std::string>& lines, Frame& out);
 
 void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame& out,
                  std::vector<uint8_t>* debugTint = nullptr);

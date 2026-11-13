@@ -19,9 +19,33 @@
 | P | Change palette |
 | Esc | Quit |
 
+## Test mode (F7)
+**F7** lists every part of the port that needs checking. Each item comes with a one-line note
+of what to look for.
+
+| Key | Does |
+|---|---|
+| Up / Down (Page Up / Page Down to jump) | Move through the list |
+| A (Z / Space / Enter) | Set the item up: the map, the battle, the spell or death style for the next fight, and so on. The note of what to check stays on screen for ten seconds. |
+| Right | Mark it **ok** |
+| Left | Mark it as a **bug**. The menu closes and a bug report is saved from the game screen, including the last 30 seconds as video. |
+| B / F7 / Esc | Close |
+
+Marks are kept in `test_results.txt` next to the exe, so the list shows what's done between
+sessions.
+
+## Video
+- **F8** starts and stops recording, with sound, to `captures\ffl3-<date>-<time>.avi`. It's
+  small: about 1 MB a minute plus sound. It plays in VLC, Windows Media Player and ffmpeg.
+  Recording stops on its own if you change the screen width with Tab or the file reaches
+  1.8 GB.
+- **Every bug report** (F12, a Left in test mode, or a crash) includes `clip.avi`, the last
+  30 seconds before it.
+
 ## Reporting a bug
 - **F12: bug report.** Press it as soon as something looks wrong. It makes a folder in
   `bug_reports\` next to the exe containing:
+  - a video of the last 30 seconds
   - a screenshot
   - a save of that exact moment
   - your last ten minutes of key presses
@@ -49,9 +73,14 @@ cancels.
 | `fx XX` | The next attack plays sprite script XX instead (e.g. `fx 6c` fire, `fx 6b` ripple, `fx 28` vortex) |
 | `effect XX` | The next attack plays effect XX (00-17) |
 | `death N` | Monsters die with death style N (0-3; 2 = boss second form) |
-| `normal` | Undo fx / effect / death |
+| `normal` | Undo fx / effect / death / area / poke |
 | `heal` | Full HP/MP, statuses cleared |
 | `flag XX 1` / `flag XX 0` | Set / clear story flag XX |
+| `area N` | Battles count as encounter area N, so losing asks "Fight again?" (`area` to undo) |
+| `hp1` | Everyone at 1 HP |
+| `music XX` / `sfx XX` | Play song / sound effect XX (hex) |
+| `event XX YY` | Run field event XX with parameter YY (hex), e.g. `event 12 03` |
+| `poke ADDR=VAL,...` | Memory pokes for the next forced effect (used by test mode) |
 
 Other keys:
 - F1: shows collision

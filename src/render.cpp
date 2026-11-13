@@ -353,14 +353,36 @@ void renderBattle(const Battle& b, const BattleGfx& g, const TileCache& tc, cons
 // Tester notices: a white bar with a line of text across the top (wraps to two lines).
 void renderToast(const TileCache& tc, const std::string& msg, Frame& out) {
     if (msg.empty()) return;
-    const int perLine = out.w / 8;
-    const int lines = int(msg.size() + size_t(perLine) - 1) / perLine > 1 ? 2 : 1;
-    for (int y = 0; y < 8 * lines + 2 && y < out.h; y++)
+    const size_t cols = size_t(out.w / 8);
+    std::vector<std::string> lines;                     // wrapped at spaces, at most 3 lines
+    std::string cur, word;
+    for (char ch : msg + " ") {
+        if (ch != ' ') { word += ch; continue; }
+        while (word.size() > cols) { if (!cur.empty()) { lines.push_back(cur); cur.clear(); } lines.push_back(word.substr(0, cols)); word.erase(0, cols); }
+        if (!cur.empty() && cur.size() + 1 + word.size() > cols) { lines.push_back(cur); cur.clear(); }
+        if (!word.empty()) cur += (cur.empty() ? "" : " ") + word;
+        word.clear();
+    }
+    if (!cur.empty()) lines.push_back(cur);
+    if (lines.size() > 3) lines.resize(3);
+    for (int y = 0; y < int(lines.size()) * 8 + 1 && y < out.h; y++)
         for (int x = 0; x < out.w; x++) out.px[size_t(y) * out.w + x] = 0;
-    for (int l = 0; l < lines; l++) {
-        const std::string part = msg.substr(size_t(l * perLine), size_t(perLine));
-        const Glyphs g = asciiGlyphs(part.c_str());
-        for (size_t i = 0; i < g.size(); i++) putTile(out, tc.bg[g[i]], 0xe4, int(i) * 8, 1 + l * 8, true);
+    for (size_t l = 0; l < lines.size(); l++) {
+        const Glyphs g = asciiGlyphs(lines[l].c_str());
+        for (size_t i = 0; i < cols; i++) putTile(out, tc.bg[i < g.size() ? g[i] : 0xff], 0xd2, int(i) * 8, int(l) * 8, false);
+    }
+}
+
+// Tester menus: a white screen of text lines (each up to the screen width). A line starting
+// with \x01 is drawn inverted (the selected one).
+void renderLines(const TileCache& tc, const std::vector<std::string>& lines, Frame& out) {
+    std::fill(out.px.begin(), out.px.end(), uint8_t(0));
+    const int cols = out.w / 8;
+    for (size_t l = 0; l < lines.size() && int(l) * 8 < out.h; l++) {
+        const bool inv = !lines[l].empty() && lines[l][0] == '\x01';
+        const Glyphs g = asciiGlyphs(lines[l].substr(inv ? 1 : 0, size_t(cols)).c_str());
+        for (size_t i = 0; i < size_t(cols); i++)
+            putTile(out, tc.bg[i < g.size() ? g[i] : 0xff], inv ? 0x1f : 0xd2, int(i) * 8, int(l) * 8, false);
     }
 }
 
