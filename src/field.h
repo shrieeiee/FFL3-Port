@@ -135,8 +135,21 @@ private:
     // up to two (slot, direction) pairs.
     struct Glide { int frames; int slot[2]; Dir dir[2]; };
     std::vector<Glide> glides_;
-    int flash_ = 0;                    // event $12 $03: 4 x (4 frames white, 4 normal)
+    int flash_ = 0;
+    int trans_ = 0;                    // event $12 $03: 4 x (4 frames white, 4 normal)
 public:
+    // A map change seen on screen (00:39F3 fade out, the load, 00:3A0C fade in): 60 frames,
+    // the game frozen. Level 0-3 of the fade table wCDB4 (D2/D0/90, 81/80/40, 40/40/00, 0).
+    int transition() const { return trans_; }
+    int fadeLevel() const {
+        if (!trans_) return 0;
+        const int t = kTransition - trans_;                // 0.. frames into it
+        if (t < 5) return 1;
+        if (t < 10) return 2;
+        if (t < 50) return 3;
+        return t < 55 ? 2 : 1;
+    }
+    static constexpr int kTransition = 60;
     bool flashWhite() const { return flash_ > 0 && ((flash_ - 1) / 4) % 2 == 1; }
 private:
     std::vector<Walk> walks_;          // queued scripted moves ($27/$28)

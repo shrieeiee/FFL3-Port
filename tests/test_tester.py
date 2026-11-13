@@ -15,8 +15,8 @@ def check(name, ok):
     print(('PASS' if ok else 'FAIL'), name)
     fails += not ok
 res = open(os.path.join(d, 'test_results.txt')).read() if os.path.exists(os.path.join(d, 'test_results.txt')) else ''
-check('test mode: pass recorded', 'PASS | Water anim' in res)
-check('test mode: bug recorded', 'BUG  | Talon deck' in res)
+check('test mode: pass recorded', 'PASS | Panel lights' in res)
+check('test mode: bug recorded', 'BUG  | Sea animation' in res)
 reps = sorted(glob.glob(os.path.join(d, 'bug_reports', '*')))
 check('bug report from the test menu + the self-test report', len(reps) == 2)
 last = reps[-1] if reps else ''

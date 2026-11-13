@@ -21,7 +21,7 @@ check "Elder cutscene: actor 2 walks to 21,20 (game)" "slot 2 id 00 pos 21,20 fa
 check "Elder cutscene: proxy below actor (game)" "slot 3 id 00 pos 16,20"               --map 10 --pos 5,16 --run-text 02
 check "new game starts aboard the Talon"         "map 0B layout 0F gfx 21 sprites 01  8x16  player 26,7" --dump-blocks /dev/null
 check "new game: step off the Talon -> map 10 at 7,16 (game)" "map 10 layout 04 gfx 04 sprites 04  16x16  player 7,16" --walk DW
-check "Talon round trip: out, back on board (game)" "map 0B layout 0F gfx 21 sprites 01  8x16  player 26,7" --walk DWD
+check "Talon round trip: out, back on board (game; fades take 60 frames)" "map 0B layout 0F gfx 21 sprites 01  8x16  player 26,7" --walk DWWD
 # Every NPC text must parse exactly up to the next one (validates control-code lengths).
 check "shop: Buy, pick, Yes (01:7187)" "shop open, gold 560" --shop 32 --walk AAA
 check "inn: Stay costs the missing HP + MP (01:7731)" "shop open, gold 683" --shop 40 --party-hp 5 --walk A

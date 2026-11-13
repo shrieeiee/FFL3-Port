@@ -723,7 +723,9 @@ int main(int argc, char** argv) {
             std::fclose(f);
         }
         // Script: U/D/L/R step, A = press A (talk / advance text) then 40 frames, W = 60 frames.
+        // Each command first lets a map-change fade finish (as a player would wait for it).
         for (char c : walk) {
+            while (field.transition()) field.tick(-1);
             if (c == 'M' && !menu) { openMenu(); continue; }
             if (console) {                              // A / B / U / D drive the Talon cockpit
                 ConsoleInput in;
@@ -762,12 +764,20 @@ int main(int argc, char** argv) {
             if (d < 0 || text.active()) continue;
             field.tick(d);
             for (int i = 0; i < 16 && field.player().moveFrames; i++) field.tick(-1);
+            while (field.transition()) field.tick(-1);
             refreshTiles();
             if (field.lastEvent().rfind("exit", 0) == 0 || field.lastEvent().rfind("event", 0) == 0 ||
                 field.lastEvent().rfind("battle", 0) == 0)
                 std::printf("  step %c: %s\n", c, field.lastEvent().c_str()), field.setLastEvent("");
         }
         if (!savePath.empty() && !saveGame(savePath.c_str())) return 1;
+        if (std::getenv("FFL3_ATTRS")) {                     // debug: block attributes around the leader
+            const Actor& p = field.player();
+            for (int r = p.row - 3; r <= p.row + 2; r++) {
+                for (int c = p.col - 4; c <= p.col + 4; c++) std::printf(" %02X/%02X", field.blockAt(r, c), field.attrAt(r, c));
+                std::printf("\n");
+            }
+        }
         if (const char* vd = std::getenv("FFL3_VRAMDUMP")) {     // tests: VRAM $8000-$97FF after N hook frames
             refreshTiles();
             const int n = std::getenv("FFL3_HOOKFRAMES") ? std::atoi(std::getenv("FFL3_HOOKFRAMES")) : 0;
@@ -926,8 +936,9 @@ int main(int argc, char** argv) {
     struct TestItem { const char* name; const char* setup; const char* check; bool resetAfterBattle; };
     static const TestItem kTests[] = {
         {"Opening", "TITLE", "Title, story crawl (water shimmer), naming, simulator battle, cutscenes", false},
-        {"Water anim", "map 10 22 12", "Water flows, waterfall moves, like the real game", false},
-        {"Talon deck", "map 0b 26 7", "Walking, doors, people, cockpit console", false},
+        {"Panel lights", "map 10 22 12", "Talon cockpit room: panel lights and machinery animate like the real game", false},
+        {"Sea animation", "map 01 20 20", "World map: the sea ripples (compare the real game)", false},
+        {"Talon deck", "map 0b 26 7", "Walk down the hatch: fade out, white, fade in (about 1 s); A at the console inside opens the cockpit", false},
         {"Flash event", "event 12 03", "Screen flashes white 4 times with a sound", false},
         {"Normal fight", "battle 00", "Party row walks; weapon sprites; numbers bounce; death dissolve", false},
         {"Auto Set", "battle 00", "Fight menu > Auto: toggle a member; they show Auto and skip choosing", false},
@@ -1203,6 +1214,8 @@ int main(int argc, char** argv) {
                 field.tick(-1);                      // scripted actor moves animate under text
                 field.wander = true;
                 text.tick(aPressed, aHeld, up && !upPrev, down && !downPrev);
+                refreshTiles();
+                tiles.animate(field.header().hook, hff93);              // 00:3549: the text wait runs it too
             } else {
                 if (aPressed && !field.player().moveFrames && field.boardTalon()) {}
                 else if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
@@ -1231,8 +1244,20 @@ int main(int argc, char** argv) {
         } else {
             RenderOpts fo = opts;
             if (field.flashWhite()) fo.bgp = 0;                 // event $12 $03 (BGP = 0)
-            renderField(field, tiles, fo, frame, debug ? &tint : nullptr);
-            renderTextBox(text, tiles, opts, frame);
+            // Map change fade (00:39F3 / 3A0C): the old screen fades, white while loading,
+            // the new map fades in - the fade palettes lighten every shade by the level.
+            static Frame frozen;
+            static bool frozenValid = false;
+            const int tr = field.transition();
+            if (!tr) frozenValid = false;
+            else if (!frozenValid) { frozen = frame; frozenValid = true; }
+            const int t = tr ? Field::kTransition - tr : 99;
+            if (t < 10 && frozenValid && frozen.px.size() == frame.px.size()) frame = frozen;
+            else if (t < 50) std::fill(frame.px.begin(), frame.px.end(), uint8_t(0));
+            else renderField(field, tiles, fo, frame, debug ? &tint : nullptr);
+            if (t >= 50) renderTextBox(text, tiles, opts, frame);
+            if (const int lv = field.fadeLevel(); lv)
+                for (uint8_t& px : frame.px) px = uint8_t(std::max(0, int(px) - lv));
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);
             if (console) renderConsole(*console, tiles, opts, frame);

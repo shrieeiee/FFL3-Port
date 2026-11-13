@@ -129,7 +129,7 @@ bool Field::occupied(int row, int col, int selfSlot) const {
 }
 
 bool Field::busy() const {
-    if (!walks_.empty() || !glides_.empty() || flash_) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_ || trans_) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -170,6 +170,7 @@ void Field::setVehicle(int mode) {
 
 void Field::takeOff(int mode) {
     const Dir d = actors_[0].facing;
+    trans_ = kTransition;
     enterMap(saved_.map, saved_.row, saved_.col, d);
     setVehicle(mode);
     lastEvent_ = "took off";
@@ -180,6 +181,7 @@ bool Field::boardTalon() {
     const Actor& p = actors_[0];
     if (vehicle_ != 0 || p.moveFrames || map_ != saved_.map || p.row != saved_.row || p.col != saved_.col) return false;
     flags_.event.set(0x09);
+    trans_ = kTransition;
     enterMap(0x10, 7, 16, Dir::Up);
     lastEvent_ = "boarded the Talon";
     return true;
@@ -190,6 +192,7 @@ bool Field::land() {
     const Actor& p = actors_[0];
     saved_ = {map_, p.row, p.col};                             // 4250: wC6E4 -> wC6E9
     setVehicle(0);
+    trans_ = kTransition;
     enterMap(0x10, 5, 16, Dir::Up);                            // 636D: scroll (0, $B0) on map $10
     lastEvent_ = "landed";
     return true;
@@ -275,6 +278,7 @@ void Field::wanderStep() {
 }
 
 void Field::tick(int dir) {
+    if (trans_) { trans_--; return; }                    // fading: nothing moves
     for (Actor& a : actors_) a.animTick++;
     if (flash_) flash_--;
     if (!glides_.empty()) {                                // 00:18F5: one pixel a frame
@@ -362,6 +366,7 @@ bool Field::warpTo(int map, uint8_t b2, uint8_t b3) {
     // 00:1468: wC6EE = (b3 bit7) << 7 | (b2 bit7) << 6; scroll = (b & $7F) * 16 px.
     // The leader stands $50 px (5 blocks) into the screen.
     const Dir f = Dir(((b3 >> 7) << 1) | (b2 >> 7));
+    trans_ = kTransition;
     return enterMap(map, (b2 & 0x7f) + 5, (b3 & 0x7f) + 5, f);
 }
 
@@ -409,6 +414,7 @@ void Field::runEventCommand(int cmd, int param) {
         if (returnStack_.empty()) { lastEvent_ = "return stack empty"; return; }
         const Return r = returnStack_.back();
         returnStack_.pop_back();
+        trans_ = kTransition;
         enterMap(r.map, r.row, r.col, Dir::Down);
         lastEvent_ = "returned to previous map";
     };
@@ -552,6 +558,7 @@ void Field::runEventCommand(int cmd, int param) {
     case 0x3f:                                                         // $FF block by the Talon
         // Past the end of the 63-entry table; behaviour taken from the real game (emulator):
         // stepping onto it boards the Talon, landing at (26,7) facing up on map $0B.
+        trans_ = kTransition;
         enterMap(0x0b, 26, 7, Dir::Up);
         lastEvent_ = "boarded the Talon";
         return;
