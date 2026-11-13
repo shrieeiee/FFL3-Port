@@ -28,7 +28,7 @@ of what to look for.
 | Up / Down (Page Up / Page Down to jump) | Move through the list |
 | A (Z / Space / Enter) | Set the item up: the map, the battle, the spell or death style for the next fight, and so on. The note of what to check stays on screen for ten seconds. |
 | Right | Mark it **ok** |
-| Left | Mark it as a **bug**. The menu closes and a bug report is saved from the game screen, including the last 30 seconds as video. |
+| Left | Mark it as a **bug**. The menu closes and a bug report is saved from the game screen, including the last 30 seconds as video. Then type a note and press Enter. |
 | B / F7 / Esc | Close |
 
 Marks are kept in `test_results.txt` next to the exe, so the list shows what's done between
@@ -52,7 +52,8 @@ sessions.
   - a log of what the game was doing
   - version and position details
 
-  Then write one line about what went wrong (a note in the folder is fine).
+  A line then opens at the top: type what went wrong and press Enter, which saves it as
+  `note.txt` with the report. Esc skips the note.
 - **Crashes** write the same kind of folder automatically, without the save.
 - **F11** takes a plain screenshot.
 - **"Not done yet: ..."** across the top of the screen means the port reached a story event it
@@ -140,6 +141,11 @@ For each item, compare against the real game; anything different is worth an F12
 
 **Saving**
 - [ ] Save in the menu and with F5, Continue from the title, F9
+
+## Map changes
+Going through a door or down a hatch fades out, stays white for a moment while the map
+loads, then fades in, about a second in all, like the real game. Holding a direction
+straight through a hatch takes you back again, also like the real game.
 
 ## Known not done yet
 Each of these shows a "Not done yet" notice when it comes up:

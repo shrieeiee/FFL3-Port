@@ -894,6 +894,7 @@ int main(int argc, char** argv) {
     installCrashHandler([&] { writeReport(true); });
     bool prompt = false;                                // F10: tester command line
     std::string promptLine;
+    std::string noteDir;                                // set: the prompt is a bug note for that report
     std::string lastLogged;
     auto runCommand = [&](const std::string& line) {
         char cmd[32] = {};
@@ -1051,7 +1052,17 @@ int main(int argc, char** argv) {
                 if (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) {
                     prompt = false;
                     SDL_StopTextInput();
-                    if (e.key.keysym.sym != SDLK_ESCAPE && !promptLine.empty()) notify(runCommand(promptLine));
+                    if (!noteDir.empty()) {                       // a bug report's note
+                        if (e.key.keysym.sym != SDLK_ESCAPE && !promptLine.empty()) {
+                            if (FILE* f = std::fopen((std::filesystem::path(noteDir) / "note.txt").string().c_str(), "w")) {
+                                std::fprintf(f, "%s\n", promptLine.c_str());
+                                std::fclose(f);
+                            }
+                            buglog.event("NOTE " + promptLine);
+                            notify("Note saved with the report", 120);
+                        } else toastFrames = 0;
+                        noteDir.clear();
+                    } else if (e.key.keysym.sym != SDLK_ESCAPE && !promptLine.empty()) notify(runCommand(promptLine));
                     else toastFrames = 0;
                 }
                 continue;
@@ -1109,9 +1120,9 @@ int main(int argc, char** argv) {
                 notify(std::string("screenshot ") + name, 120);
                 break;
             }
-            case SDLK_F12: {                                     // bug report
-                const std::string dir = writeReport(false);
-                notify("Bug report saved: " + std::filesystem::path(dir).filename().string() + " - note what went wrong", 240);
+            case SDLK_F12: {                                     // bug report, then a note
+                noteDir = writeReport(false);
+                prompt = true; promptLine.clear(); SDL_StartTextInput();
                 break;
             }
             case SDLK_F10:
@@ -1235,11 +1246,11 @@ int main(int argc, char** argv) {
         if (opening == 1 || opening == 3) {
             if (opening == 1) renderTitle(*title, tiles, opts, frame);
             else renderNaming(*naming, tiles, opts, frame);
-            renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
+            renderToast(tiles, prompt ? (noteDir.empty() ? "> " : "What went wrong? (Enter) ") + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], nullptr, argb);
         } else if (battle) {
             renderBattle(*battle, bgfx, tiles, opts, frame);
-            renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
+            renderToast(tiles, prompt ? (noteDir.empty() ? "> " : "What went wrong? (Enter) ") + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], nullptr, argb);
         } else {
             RenderOpts fo = opts;
@@ -1261,7 +1272,7 @@ int main(int argc, char** argv) {
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);
             if (console) renderConsole(*console, tiles, opts, frame);
-            renderToast(tiles, prompt ? "> " + promptLine + "_" : toast, frame);
+            renderToast(tiles, prompt ? (noteDir.empty() ? "> " : "What went wrong? (Enter) ") + promptLine + "_" : toast, frame);
             toArgb(frame, kPalettes[pal], debug ? &tint : nullptr, argb);
         }
         if (testMenu) {                                          // F7 test mode list
@@ -1291,8 +1302,8 @@ int main(int argc, char** argv) {
         }
         if (reportNextFrame && !testMenu && steps) {
             reportNextFrame = false;
-            const std::string dir = writeReport(false);
-            notify("Bug report saved: " + std::filesystem::path(dir).filename().string() + " - add a note", 240);
+            noteDir = writeReport(false);
+            prompt = true; promptLine.clear(); SDL_StartTextInput();
         }
         if (steps) {                                             // capture: one video frame per logic frame
             if (frame.w != clipW) {
