@@ -75,6 +75,7 @@ public:
     std::function<uint8_t(uint8_t)> random;    // 00:1D2E
     std::function<void(int)> sfx;              // a write to hFFBC
     std::vector<int> unknownIds;               // effect ids not translated yet (logged)
+    std::function<void(const std::string&)> log;
 
 private:
     struct Wait {

@@ -203,6 +203,15 @@ ffl3 [rom.gb] [--map HEX] [--pos ROW,COL] [--wide] [--scale N]
 
 ## Tests
 
+`tests/run_all.py saga3.gb [--battle-dumps DIR] [--rec-dumps DIR] [--vm-recs DIR]` runs every
+suite below plus the in-game autotest and prints a summary (exit 1 on failure). Suites that
+need dumps from the real game skip when the folder isn't given.
+
+- `ffl3 saga3.gb --autotest` – plays every test-mode item with scripted keys under its own
+  pacing, checks the expected log line / VRAM change / flash / sound / save round trip, and
+  writes `autotest/results.html` (per-item AVI + snapshots). `FFL3_AUTOTEST_ITEMS=1,9`
+  picks items. Works headless with `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`.
+
 - `tests/test_maps.sh saga3.gb` – C++ map loader vs the Python reference, all 192 maps
 - `tests/test_field.sh saga3.gb` – collision/exit behaviour, expected values taken from the
   real game running in the coverage emulator

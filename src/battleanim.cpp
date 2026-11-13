@@ -291,6 +291,7 @@ void BattleAnim::drawGrid(uint8_t code, uint8_t grid) {
 // 02:41B1: load the script's OBJ tiles and play it.
 AnimTask BattleAnim::script() {
     const uint8_t id = mem_[0xde00];
+    if (log) { char b[32]; std::snprintf(b, sizeof b, "anim script %02X", id); log(b); }
     copyRom(2, uint16_t(0x658c + rb(uint16_t(0x651c + id)) * 0x20), 0x8000, 0x200);
     copyRom(3, 0x79d4, 0x8200, 0x4a0);                 // 03:79C8: impact / common tiles
     mem_[0xde02] = 0;
@@ -510,7 +511,8 @@ AnimTask BattleAnim::death() {
     mem_[0xde19] = mem_[uint16_t(0xcc41 + s * 2)];
     mem_[0xde1a] = mem_[uint16_t(0xcc42 + s * 2)];
     int style = mem_[0xcc5c] & 3;
-    if (const char* ds = std::getenv("FFL3_DEATHSTYLE")) style = std::atoi(ds) & 3;   // debug
+    if (const char* ds = std::getenv("FFL3_DEATHSTYLE"); ds && *ds) style = std::atoi(ds) & 3;   // debug
+    if (log) log("anim death style " + std::to_string(style));
     if (style == 1) { co_await death1(); co_return; }
     if (style == 3) { co_await death3(); co_return; }
     if (style == 2) { co_await death2(); co_return; }
@@ -1042,6 +1044,7 @@ AnimTask BattleAnim::tilePatch() {
 // 02:4397 through the table at 02:4364.
 AnimTask BattleAnim::effect(int id) {
     id &= 0x3f;
+    if (log && id) { char b[32]; std::snprintf(b, sizeof b, "anim effect %02X", id); log(b); }
     switch (id) {
     case 0x00: co_return;
     case 0x01: co_await vanish(); co_return;

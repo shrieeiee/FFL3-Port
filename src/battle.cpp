@@ -64,6 +64,7 @@ Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, c
     vm_.mem = ram_;
     anim_.random = [this](uint8_t n) { return rnd(n); };
     anim_.sfx = [this](int id) { if (playSfx) playSfx(id); };
+    anim_.log = [this](const std::string& l) { if (onEvent) onEvent(l); };
     vm_.mem[0xff90] = uint8_t(seed);
     vm_.mem[0xff93] = uint8_t(seed >> 8);
     ctx_ = ctx;
@@ -232,6 +233,7 @@ bool Battle::native(uint16_t addr) {
         }
         state_ = State::Retry;
         cursor_ = 0;
+        if (onEvent) onEvent("fight again shown");
         return false;
     case 0x5fb7:                                       // print battle message wCE8D/8E
         showMessage();
@@ -263,9 +265,9 @@ void Battle::reviveParty() {
 }
 
 bool Battle::startAnim(uint16_t entry) {
-    if (const char* fx = std::getenv("FFL3_FORCEFX"); fx && entry == 0x4000)   // debug: try a script
+    if (const char* fx = std::getenv("FFL3_FORCEFX"); fx && *fx && entry == 0x4000)   // debug: try a script
         vm_.mem[0xc9bd] = uint8_t(0x80 | std::strtol(fx, nullptr, 16));
-    if (const char* fx = std::getenv("FFL3_FORCEEFFECT"); fx && entry == 0x4000) {   // debug: an effect id
+    if (const char* fx = std::getenv("FFL3_FORCEEFFECT"); fx && *fx && entry == 0x4000) {   // debug: an effect id
         vm_.mem[0xc9bd] = uint8_t(std::strtol(fx, nullptr, 16) & 0x3f);
         if (const char* p = std::getenv("FFL3_POKE"))     // ADDR=VAL,...
             for (const char* q = p; *q;) {
@@ -519,7 +521,10 @@ void Battle::tick(const BattleInput& in) {
         if (in.right) moveTarget(1, 0);
         if (in.up) moveTarget(0, -1);
         if (in.down) moveTarget(0, 1);
-        if (in.a && target_ < 5) vm_.mem[size_t(0xc500 + target_ * 0x60)] ^= 0x80;   // record bit 7
+        if (in.a && target_ < 5) {
+            vm_.mem[size_t(0xc500 + target_ * 0x60)] ^= 0x80;   // record bit 7
+            if (onEvent) onEvent("auto set member " + std::to_string(target_) + ((vm_.mem[size_t(0xc500 + target_ * 0x60)] & 0x80) ? " on" : " off"));
+        }
         return;
     case State::Command:
         if (in.up) cursor_ = (cursor_ + 3) % 4;

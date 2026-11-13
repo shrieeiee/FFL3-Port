@@ -73,15 +73,17 @@ public:
 
     const Formation& formation() const { return form_; }
     std::function<void(int id)> playSfx;   // sound effects the battle bytecode requests (hFFBC)
+    std::function<void(const std::string&)> onEvent;   // what happened, for testers' logs and --autotest
     const EnemyLayout& layout() const { return layout_; }
     const std::vector<Monster>& monsters() const { return groups_; }   // per group
     int enemyHp(int slot) const;
     int memberSprite(int m) const;
     std::vector<std::string> log;            // every message line, ASCII (tests)
     std::vector<uint16_t> unknownNatives;    // natives not handled yet (logged, skipped)
+    enum class State { Intro, Vm, FightMenu, Command, List, Target, Message, Wait, Retry, AutoSet, Done };
+    State state() const { return state_; }
 
 private:
-    enum class State { Intro, Vm, FightMenu, Command, List, Target, Message, Wait, Retry, AutoSet, Done };
 
     uint8_t m(uint16_t a) const { return vm_.mem[a]; }
     int word(uint16_t a) const { return vm_.mem[a] | vm_.mem[uint16_t(a + 1)] << 8; }

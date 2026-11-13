@@ -34,6 +34,23 @@ of what to look for.
 Marks are kept in `test_results.txt` next to the exe, so the list shows what's done between
 sessions.
 
+## Automatic test run
+**`run_autotest.bat`** (or `ffl3.exe --autotest`) plays through every test-mode item on its own:
+it sets each one up, presses the keys, and checks that the right thing happened (the battle
+started, the animation ran, the tiles moved, the screen flashed, the save loaded back the same,
+and so on). It runs flat out, so the whole list takes about a minute and the window looks
+frantic. Leave it alone until it closes.
+
+The results go in an `autotest` folder next to the exe. `results.html` opens in a browser and
+shows each item as PASS or FAIL, with a video of every item and snapshots along the way. If
+anything fails, zip the `autotest` folder and send it over.
+
+An automatic run only shows that things happen. It can't tell that they look right, so the
+checklist below still needs a human.
+
+`set FFL3_AUTOTEST_ITEMS=1,9,6` before running picks particular items (numbers as in the F7
+list).
+
 ## Video
 - **F8** starts and stops recording, with sound, to `captures\ffl3-<date>-<time>.avi`. It's
   small: about 1 MB a minute plus sound. It plays in VLC, Windows Media Player and ffmpeg.

@@ -32,6 +32,7 @@ using namespace ffl3;
 namespace {
 
 ffl3::AudioTap* g_tap = nullptr;                        // sound for the video recorder (audio thread)
+std::function<void(const std::string&)> g_eventLog;     // battle / anim events into the tester log
 
 struct Palette { const char* name; uint32_t c[4]; };
 const Palette kPalettes[] = {
@@ -114,6 +115,7 @@ int dirFromChar(char c) {
 
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk, savePath, loadPath;
+    bool autotestArg = false;
     int runScript = -1;
     int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
     std::string keys, dumpView, ramPokes;
@@ -133,6 +135,7 @@ int main(int argc, char** argv) {
         else if (a == "--walk" && i + 1 < argc) walk = argv[++i];
         else if (a == "--save" && i + 1 < argc) savePath = argv[++i];   // after --walk
         else if (a == "--load" && i + 1 < argc) loadPath = argv[++i];
+        else if (a == "--autotest") autotestArg = true;          // play every test-mode item, write autotest/
         else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-text" && i + 1 < argc) runTextId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-script" && i + 1 < argc) runScript = int(std::strtol(argv[++i], nullptr, 16));   // BAAAA: bank B, address AAAA
@@ -239,8 +242,9 @@ int main(int argc, char** argv) {
         }
         ctx.vehicle = field.vehicle();
         ctx.area = field.encounterArea();
-        if (const char* a = std::getenv("FFL3_AREA")) ctx.area = std::atoi(a);   // debug
+        if (const char* a = std::getenv("FFL3_AREA"); a && *a) ctx.area = std::atoi(a);   // debug
         battle = std::make_unique<Battle>(rom, battleRam, party, ctx, hffca, battleSeed++ * 2654435761u);
+        battle->onEvent = [](const std::string& l) { if (g_eventLog) g_eventLog(l); };
         battle->playSfx = [&](int id) { sndSfx(id); };
         sndMusic(0);                                    // 00:10D7 stop the field music,
         sndSfx(0x36);                                   // 00:10E1 encounter sound
@@ -254,6 +258,10 @@ int main(int argc, char** argv) {
     auto finishBattle = [&] {
         const Battle::Result r = battle->result();
         battle.reset();
+        if (g_eventLog) {
+            static const char* kRes[] = {"none", "won", "lost", "ran", "game over"};
+            g_eventLog(std::string("battle result ") + kRes[int(r)]);
+        }
         if (r == Battle::Result::GameOver) { gameOver = true; field.setLastEvent("game over"); return; }
         if (r == Battle::Result::Lost) {               // story fights you can lose: carry on at 1 HP
             field.setLastEvent("party defeated");
@@ -852,6 +860,10 @@ int main(int argc, char** argv) {
 #endif
     // ---- tester support: input / event log, F12 bug reports, crash reports, F10 commands ----
     BugLog buglog;
+    std::vector<std::string> atLines;                   // --autotest: this item's events
+    bool atOn = false;
+    auto logEvent = [&](const std::string& l) { buglog.event(l); if (atOn) atLines.push_back(l); };
+    g_eventLog = logEvent;
     // Video: F8 records to captures/; the last 30 s always go into F12 reports as clip.avi.
     AudioTap tap;
     g_tap = &tap;
@@ -862,7 +874,7 @@ int main(int argc, char** argv) {
     int clipW = 0;
     std::string toast;                                  // notice across the top of the screen
     int toastFrames = 0;
-    auto notify = [&](const std::string& msg, int frames = 300) { toast = msg; toastFrames = frames; buglog.event("NOTICE " + msg); };
+    auto notify = [&](const std::string& msg, int frames = 300) { toast = msg; toastFrames = frames; logEvent("NOTICE " + msg); };
     field.onUnknownEvent = [&](const char* what) {
         notify(std::string("Not done yet: ") + what + " - press F12 to report");
     };
@@ -901,7 +913,7 @@ int main(int argc, char** argv) {
         unsigned a = 0, b = 0, c = 0;
         const int n = std::sscanf(line.c_str(), "%31s %x %u %u", cmd, &a, &b, &c);
         const std::string k = cmd;
-        buglog.event("COMMAND " + line);
+        logEvent("COMMAND " + line);
         if (k == "battle" && n >= 2 && !battle) { field.startBattle(int(a)); return std::string("battle ") + line.substr(7); }
         if (k == "map" && n >= 2) {
             field.setVehicle(a < 6 ? 2 : 0);
@@ -989,7 +1001,7 @@ int main(int argc, char** argv) {
             std::fprintf(f, "%s %s %s | %s\n", t, FFL3_VERSION, pass ? "PASS" : "BUG ", kTests[i].name);
             std::fclose(f);
         }
-        buglog.event(std::string(pass ? "TEST PASS " : "TEST BUG ") + kTests[i].name);
+        logEvent(std::string(pass ? "TEST PASS " : "TEST BUG ") + kTests[i].name);
     };
     std::function<void(const std::string&)> runSetup = [&](const std::string& setup) {
         runCommand("normal");
@@ -1010,6 +1022,231 @@ int main(int argc, char** argv) {
             at = semi + 1;
         }
     };
+
+    // ---- --autotest: every test-mode item played by itself, recorded and checked ----
+    // Each item: extra input (frame:key[:hold] relative to the item start, "mash" = press A
+    // every 16 frames), the most frames it may take, and what must appear in its event log.
+    struct AutoSpec { const char* name; const char* keys; int frames; const char* expect; };
+    static const AutoSpec kAuto[] = {
+        {"Opening", "mash start", 20000, "battle: formation"},
+        {"Panel lights", "", 240, "TILES"},
+        {"Sea animation", "", 240, "TILES"},
+        {"Talon deck", "20:Down:20", 240, "entered map 10"},
+        {"Flash event", "", 90, "FLASH"},
+        {"Normal fight", "mash", 9000, "anim script|battle result won"},
+        {"Auto Set", "90:Down 100:Down 110:A 125:A 140:B mash150", 9000, "auto set member 1 on|battle result"},
+        {"Fight again?", "mash retryno", 9000, "fight again shown|battle result game over"},
+        {"Boss fight", "mash", 15000, "battle: formation 5A (fixed)|battle result"},
+        {"Spell fire", "mash", 9000, "anim script 6C|battle result"},
+        {"Spell ripple", "mash", 9000, "anim script 6B|anim effect 06|battle result"},
+        {"Spell gather", "mash", 9000, "anim script 6A|anim effect 05|battle result"},
+        {"Spell bubbles", "mash", 9000, "anim script 6D|anim effect 08|battle result"},
+        {"Spell rocks", "mash", 9000, "anim script 6E|anim effect 09|battle result"},
+        {"Spell orbs", "mash", 9000, "anim script 68|anim effect 0C|battle result"},
+        {"Spell clouds", "mash", 9000, "anim script 27|anim effect 0D|battle result"},
+        {"Spell shimmer", "mash", 9000, "anim script 44|anim effect 0A|battle result"},
+        {"Spell vortex", "mash", 9000, "anim script 28|anim effect 0B|battle result"},
+        {"Death dissolve", "mash", 9000, "anim death style 0|battle result"},
+        {"Death lines", "mash", 9000, "anim death style 1|battle result"},
+        {"Death 2nd form", "mash", 9000, "anim death style 2|battle result"},
+        {"Death melt", "mash", 9000, "anim death style 3|battle result"},
+        {"Picture swap", "mash", 9000, "anim effect 13|battle result"},
+        {"Thrown object", "mash", 9000, "anim effect 14|battle result"},
+        {"Sound test", "", 180, "SOUND"},
+        {"Saving", "", 10, "SAVE"},
+    };
+    struct AutoResult { std::string name, verdict, why; int frames = 0; std::vector<std::string> shots; std::string video; };
+    std::vector<AutoResult> atResults;
+    bool atQuit = false;
+    int atItem = -1, atFrame = 0, atRetryNo = 0;
+    std::string atDir;
+    Recorder atRec;
+    std::array<uint8_t, 0x1800> atVram{};
+    bool atTiles = false, atFlash = false, atSound = false, atSawBattle = false;
+    uint64_t atLastHash = 0; int atSame = 0;
+    auto atSpec = [&](int i) -> const AutoSpec* {
+        for (const AutoSpec& a : kAuto) if (std::string(a.name) == kTests[i].name) return &a;
+        return nullptr;
+    };
+    auto atReset = [&] {                                       // back to a clean state between items
+        battle.reset(); shop.reset(); menu.reset(); console.reset(); text.close();
+        title.reset(); naming.reset(); opening = 0; prologue = false;
+        runCommand("normal");
+        runCommand("heal");
+        field.setVehicle(0);
+        field.enterMap(0x0b, 26, 7, Dir::Up);
+        while (field.transition()) field.tick(-1);
+    };
+    auto atStart = [&](int i) {
+        atItem = i; atFrame = 0; atRetryNo = 0;
+        atLines.clear();
+        atTiles = atFlash = atSound = atSawBattle = false;
+        atSame = 0; atLastHash = 0;
+        atReset();
+        char nm[96];
+        std::snprintf(nm, sizeof nm, "%02d-%s", i + 1, kTests[i].name);
+        std::string safe = nm;
+        for (char& c : safe) if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-') c = '_';
+        atResults.push_back({kTests[i].name, "", "", 0, {}, safe + ".avi"});
+        atRec.open((std::filesystem::path(atDir) / (safe + ".avi")).string(), frame.w, frame.h, palRgb(), audioRate);
+        if (std::string(kTests[i].name) == "Saving") return;
+        runSetup(kTests[i].setup);
+        atVram = tiles.vram;
+    };
+    auto atFinish = [&](bool timedOut) {
+        AutoResult& r = atResults.back();
+        r.frames = atFrame;
+        const AutoSpec* sp = atSpec(atItem);
+        std::string why;
+        auto has = [&](const std::string& x) {
+            if (x == "TILES") return atTiles;
+            if (x == "FLASH") return atFlash;
+            if (x == "SOUND") return atSound;
+            for (const std::string& l : atLines) if (l.find(x) != std::string::npos) return true;
+            return false;
+        };
+        if (std::string(kTests[atItem].name) == "Saving") {     // save, change, load: back as it was
+            const std::string a = (std::filesystem::path(atDir) / "save-a.sav").string(), b = (std::filesystem::path(atDir) / "save-b.sav").string();
+            const bool ok1 = saveGame(a.c_str());
+            const int hp0 = party[0].hp();
+            party[0].setHp(1);
+            field.enterMap(0x10, 22, 12, Dir::Up);
+            const bool ok2 = loadGame(a.c_str()) && saveGame(b.c_str());
+            std::vector<char> da, db;
+            for (auto [path, v] : {std::pair{a, &da}, std::pair{b, &db}})
+                if (FILE* f = std::fopen(path.c_str(), "rb")) { char buf[4096]; size_t n; while ((n = std::fread(buf, 1, sizeof buf, f))) v->insert(v->end(), buf, buf + n); std::fclose(f); }
+            if (!ok1 || !ok2) why += "save/load failed; ";
+            else if (da != db) why += "save -> load -> save differs; ";
+            if (party[0].hp() != hp0) why += "HP not restored by load; ";
+            if (field.mapId() != 0x0b) why += "map not restored by load; ";
+        } else if (sp) {
+            std::string ex = sp->expect;
+            for (size_t at = 0; at <= ex.size();) {
+                const size_t bar = ex.find('|', at);
+                const std::string part = ex.substr(at, bar == std::string::npos ? std::string::npos : bar - at);
+                if (!part.empty() && !has(part)) why += "missing: " + part + "; ";
+                if (bar == std::string::npos) break;
+                at = bar + 1;
+            }
+        }
+        for (const std::string& l : atLines)
+            if (l.find("Not done yet") != std::string::npos || l.find("not translated") != std::string::npos) why += l.substr(0, 80) + "; ";
+        if (timedOut) why += "did not finish in " + std::to_string(atFrame) + " frames; ";
+        if (atSame > 600) why += "screen frozen " + std::to_string(atSame) + " frames; ";
+        r.verdict = why.empty() ? "PASS" : "FAIL";
+        r.why = why;
+        atRec.close();
+        std::printf("%-4s %-16s %6d frames  %s\n", r.verdict.c_str(), r.name.c_str(), r.frames, why.c_str());
+        std::fflush(stdout);
+    };
+    auto atWriteHtml = [&] {
+        FILE* f = std::fopen((std::filesystem::path(atDir) / "results.html").string().c_str(), "w");
+        FILE* t = std::fopen((std::filesystem::path(atDir) / "results.txt").string().c_str(), "w");
+        if (!f || !t) return;
+        int pass = 0;
+        for (auto& r : atResults) pass += r.verdict == "PASS";
+        std::fprintf(f, "<!DOCTYPE html><meta charset=utf-8><title>FFL3 port autotest</title><style>body{font:14px sans-serif;margin:24px;background:#f6f6f2}"
+                        "td,th{padding:6px 10px;border-bottom:1px solid #ddd;vertical-align:top;text-align:left}.PASS{color:#1a7f37;font-weight:bold}.FAIL{color:#c0392b;font-weight:bold}"
+                        "img{image-rendering:pixelated;width:160px;margin:2px;border:1px solid #999}</style>"
+                        "<h1>FFL3 port autotest</h1><p>Version %s. %d of %zu passed. Each item was played by itself and recorded (the .avi links); "
+                        "the pictures are snapshots during it. A pass means it ran to the end and did what the item is for - compare the videos "
+                        "with the real game for how it looks.</p><table><tr><th>Item</th><th>Result</th><th>Frames</th><th>Snapshots</th></tr>",
+                     FFL3_VERSION, pass, atResults.size());
+        std::fprintf(t, "FFL3 port %s autotest: %d of %zu passed\n", FFL3_VERSION, pass, atResults.size());
+        for (auto& r : atResults) {
+            std::fprintf(f, "<tr><td>%s<br><a href='%s'>video</a></td><td class=%s>%s<br><small>%s</small></td><td>%d</td><td>",
+                         r.name.c_str(), r.video.c_str(), r.verdict.c_str(), r.verdict.c_str(), r.why.c_str(), r.frames);
+            for (auto& sh : r.shots) std::fprintf(f, "<img src='%s'>", sh.c_str());
+            std::fprintf(f, "</td></tr>\n");
+            std::fprintf(t, "%-4s %-16s %6d  %s\n", r.verdict.c_str(), r.name.c_str(), r.frames, r.why.c_str());
+        }
+        std::fprintf(f, "</table>");
+        std::fclose(f);
+        std::fclose(t);
+    };
+    // Synthesised keys for this frame (scancodes into k), from the item's script.
+    auto atKeys = [&](Uint8* k) {
+        const AutoSpec* sp = atSpec(atItem);
+        if (!sp) return;
+        const std::string keys = sp->keys;
+        bool mash = keys.find("mash") != std::string::npos;
+        int mashFrom = 0;
+        if (size_t m = keys.find("mash"); m != std::string::npos && m + 4 < keys.size() && std::isdigit(static_cast<unsigned char>(keys[m + 4]))) mashFrom = std::atoi(keys.c_str() + m + 4);
+        // frame:Key[:hold] tokens
+        for (size_t at = 0; at < keys.size();) {
+            size_t sp2 = keys.find(' ', at);
+            const std::string tok = keys.substr(at, sp2 == std::string::npos ? std::string::npos : sp2 - at);
+            int fr = 0, hold = 3;
+            char name[16] = {};
+            if (std::sscanf(tok.c_str(), "%d:%15[A-Za-z]:%d", &fr, name, &hold) >= 2 && atFrame >= fr && atFrame < fr + hold) {
+                const std::string n = name;
+                if (n == "Down") k[SDL_SCANCODE_DOWN] = 1;
+                else if (n == "Up") k[SDL_SCANCODE_UP] = 1;
+                else if (n == "Left") k[SDL_SCANCODE_LEFT] = 1;
+                else if (n == "Right") k[SDL_SCANCODE_RIGHT] = 1;
+                else if (n == "A") k[SDL_SCANCODE_Z] = 1;
+                else if (n == "B") k[SDL_SCANCODE_X] = 1;
+            }
+            if (sp2 == std::string::npos) break;
+            at = sp2 + 1;
+        }
+        // "Fight again?": choose No (Down, then A) once it shows
+        if (keys.find("retryno") != std::string::npos && battle && battle->state() == Battle::State::Retry) {
+            atRetryNo++;
+            if (atRetryNo == 10) k[SDL_SCANCODE_DOWN] = 1;
+            if (atRetryNo >= 20 && atRetryNo % 16 < 2) k[SDL_SCANCODE_Z] = 1;
+            return;
+        }
+        if (mash && atFrame >= mashFrom && atFrame % 16 < 2) {
+            k[SDL_SCANCODE_Z] = 1;
+            if (keys.find("start") != std::string::npos) k[SDL_SCANCODE_RETURN] = 1;
+        }
+    };
+    // Once a frame after rendering: snapshots, checks, end of the item.
+    auto atAfterFrame = [&] {
+        if (atItem < 0) return;
+        atFrame++;
+        const std::string nm = kTests[atItem].name;
+        if (battle) atSawBattle = true;
+        if (!atTiles && tiles.vram != atVram && atFrame > 2) atTiles = true;
+        if (field.flashWhite()) atFlash = true;
+        uint64_t h = 1469598103934665603ull;
+        for (uint8_t px : frame.px) h = (h ^ px) * 1099511628211ull;
+        atSame = h == atLastHash ? atSame + 1 : 0;
+        atLastHash = h;
+        static const int kShots[] = {15, 60, 150, 300, 600, 1200, 2400, 4800};
+        for (int sf : kShots)
+            if (atFrame == sf) {
+                char b[160];
+                std::snprintf(b, sizeof b, "%s-f%05d.bmp", atResults.back().video.substr(0, atResults.back().video.size() - 4).c_str(), sf);
+                saveBmp(argb, frame.w, frame.h, (std::filesystem::path(atDir) / b).string().c_str());
+                atResults.back().shots.push_back(b);
+            }
+        const AutoSpec* sp = atSpec(atItem);
+        const int limit = sp ? sp->frames : 600;
+        bool done = false;
+        if (nm == "Opening") done = atFrame > 120 && !opening && !prologue && !battle && !text.active() && !field.busy();
+        else if (nm == "Fight again?") done = atSawBattle && !battle;
+        else if (std::string(kTests[atItem].setup).find("battle") != std::string::npos) done = atSawBattle && !battle && !text.active();
+        else done = atFrame >= limit;
+        if (nm == "Fight again?" && opening == 1) done = true;  // "No" went to the title
+        if (done || atFrame >= limit) {
+            if (!done || atFrame >= limit) {
+                // items that just run for their time are done, not timed out
+                const bool timed = std::string(kTests[atItem].setup).find("battle") != std::string::npos || nm == "Opening";
+                atFinish(timed && !done);
+            } else atFinish(false);
+            int next = atItem + 1;
+            if (const char* only = std::getenv("FFL3_AUTOTEST_ITEMS"); only && *only) {   // e.g. "5,9,12"
+                next = -1;
+                std::string o = std::string(",") + only + ",";
+                for (int j = atItem + 1; j < kNumTests && next < 0; j++)
+                    if (o.find("," + std::to_string(j + 1) + ",") != std::string::npos) next = j;
+            }
+            if (next >= 0 && next < kNumTests) atStart(next);
+            else { atItem = -1; atWriteHtml(); atQuit = true; }
+        }
+    };
     std::string lastTitle;
     bool running = true;
     Uint64 last = SDL_GetPerformanceCounter();
@@ -1017,7 +1254,18 @@ int main(int argc, char** argv) {
     bool aPrev = true, upPrev = true, downPrev = true, bPrev = true, leftPrev = true, rightPrev = true;
     bool startPrev = true, aKeyPrev = true;
 
-    while (running) {
+    if (autotestArg) {                                       // --autotest: results in autotest/ next to the exe
+        atDir = (std::filesystem::path(exeDir) / "autotest").string();
+        std::error_code ec;
+        std::filesystem::remove_all(atDir, ec);
+        std::filesystem::create_directories(atDir, ec);
+        atOn = true;
+        int first = 0;
+        if (const char* only = std::getenv("FFL3_AUTOTEST_ITEMS"); only && *only) first = std::max(0, std::atoi(only) - 1);
+        std::printf("FFL3 port %s autotest -> %s\n", FFL3_VERSION, atDir.c_str());
+        atStart(first);
+    }
+    while (running && !atQuit) {
         SDL_Event e;
         if (const char* inj = std::getenv("FFL3_INJECT")) {      // tests: "frame:Key frame:Key ..." key presses
             static std::vector<std::pair<uint64_t, SDL_Keycode>> evs;
@@ -1058,7 +1306,7 @@ int main(int argc, char** argv) {
                                 std::fprintf(f, "%s\n", promptLine.c_str());
                                 std::fclose(f);
                             }
-                            buglog.event("NOTE " + promptLine);
+                            logEvent("NOTE " + promptLine);
                             notify("Note saved with the report", 120);
                         } else toastFrames = 0;
                         noteDir.clear();
@@ -1152,12 +1400,19 @@ int main(int argc, char** argv) {
         acc += double(now - last) / double(SDL_GetPerformanceFrequency());
         last = now;
         if (acc > 0.25) acc = 0.25;
+        if (atItem >= 0) acc = 1.0 / 60.0;                   // --autotest: one frame per loop, as fast as it goes
         int steps = 0;                                           // logic frames this time round (for capture)
         while (acc >= 1.0 / 60.0) {
             acc -= 1.0 / 60.0;
             steps++;
             static const Uint8 kNoKeys[SDL_NUM_SCANCODES] = {};
             const Uint8* k = prompt || testMenu ? kNoKeys : SDL_GetKeyboardState(nullptr);   // typing / test menu: no game input
+            static Uint8 synth[SDL_NUM_SCANCODES];
+            if (atItem >= 0) {                                   // --autotest drives the keys
+                std::memset(synth, 0, sizeof synth);
+                atKeys(synth);
+                k = synth;
+            }
             int d = -1;
             if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = int(Dir::Down);
             else if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) d = int(Dir::Up);
@@ -1174,7 +1429,7 @@ int main(int argc, char** argv) {
             buglog.frame(uint16_t((aHeld ? BugLog::A : 0) | (bHeld ? BugLog::B : 0) | (startHeld ? BugLog::Start : 0) |
                                   (up ? BugLog::Up : 0) | (down ? BugLog::Down : 0) | (d == int(Dir::Left) ? BugLog::Left : 0) |
                                   (d == int(Dir::Right) ? BugLog::Right : 0) | (k[SDL_SCANCODE_M] || k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT] ? BugLog::Menu : 0)));
-            if (field.lastEvent() != lastLogged) { lastLogged = field.lastEvent(); if (!lastLogged.empty()) buglog.event(lastLogged); }
+            if (field.lastEvent() != lastLogged) { lastLogged = field.lastEvent(); if (!lastLogged.empty()) logEvent(lastLogged); }
             if (toastFrames > 0 && --toastFrames == 0) toast.clear();
             if (const char* tr = std::getenv("FFL3_SELFTEST"); tr && buglog.frameNo() == uint64_t(std::getenv("FFL3_SELFTEST_AT") ? std::atoi(std::getenv("FFL3_SELFTEST_AT")) : 120)) {   // packaging check
                 std::printf("report: %s\n", writeReport(false).c_str());
@@ -1318,8 +1573,13 @@ int main(int argc, char** argv) {
                 rec.audio(snd);
                 if (rec.bytes() > 1800ull << 20) { rec.close(); notify("Recording stopped at 1.8 GB - press F8 for a new file", 240); }
             }
+            if (atItem >= 0) {
+                if (atRec.isOpen()) { atRec.frame(rle); atRec.audio(snd); }
+                for (size_t i = 0; i < snd.size(); i += 7) if (std::abs(int(snd[i])) > 800) { atSound = true; break; }
+            }
             clip.add(rle, std::move(snd));
             for (int i = 1; i < steps; i++) clip.add(rle, {});
+            if (atItem >= 0) atAfterFrame();
         }
         if (!tex || texW != frame.w) {
             if (tex) SDL_DestroyTexture(tex);
@@ -1332,7 +1592,7 @@ int main(int argc, char** argv) {
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
         SDL_RenderClear(ren);
         SDL_RenderCopy(ren, tex, nullptr, nullptr);
-        SDL_RenderPresent(ren);
+        if (atItem < 0 || atFrame % 8 == 0) SDL_RenderPresent(ren);   // autotest: show every 8th frame
 
         char title[200];
         std::snprintf(title, sizeof title, "FFL3 - map %02X (%d,%d)%s%s - %s", field.mapId(),
@@ -1341,10 +1601,16 @@ int main(int argc, char** argv) {
         if (lastTitle != title) { SDL_SetWindowTitle(win, title); lastTitle = title; }
     }
     g_tap = nullptr;
+    g_eventLog = nullptr;
     if (adev) SDL_CloseAudioDevice(adev);
     if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
+    if (autotestArg) {
+        int fails = 0;
+        for (auto& r : atResults) fails += r.verdict != "PASS";
+        return fails ? 1 : 0;
+    }
     return 0;
 }
