@@ -1,3 +1,4 @@
+#include "dbgenv.h"
 #include "field.h"
 #include "battledata.h"
 #include <cstdio>
@@ -403,7 +404,7 @@ void Field::actorCommand(int param) {
 
 // Event command table at 00:124A (dispatcher 00:1236).
 void Field::runEventCommand(int cmd, int param) {
-    if (std::getenv("FFL3_EVLOG")) std::fprintf(stderr, "EV %02X %02X map %02X\n", cmd, param, map_);
+    if (dbgEnv("FFL3_EVLOG")) std::fprintf(stderr, "EV %02X %02X map %02X\n", cmd, param, map_);
     char buf[96];
     Actor& p = actors_[0];
     auto pushReturn = [&] {

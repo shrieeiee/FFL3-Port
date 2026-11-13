@@ -1,3 +1,4 @@
+#include "dbgenv.h"
 #include "battleanim.h"
 #include <algorithm>
 #include <cstdio>
@@ -511,7 +512,7 @@ AnimTask BattleAnim::death() {
     mem_[0xde19] = mem_[uint16_t(0xcc41 + s * 2)];
     mem_[0xde1a] = mem_[uint16_t(0xcc42 + s * 2)];
     int style = mem_[0xcc5c] & 3;
-    if (const char* ds = std::getenv("FFL3_DEATHSTYLE"); ds && *ds) style = std::atoi(ds) & 3;   // debug
+    if (const char* ds = dbgEnv("FFL3_DEATHSTYLE"); ds && *ds) style = std::atoi(ds) & 3;   // debug
     if (log) log("anim death style " + std::to_string(style));
     if (style == 1) { co_await death1(); co_return; }
     if (style == 3) { co_await death3(); co_return; }
@@ -1073,7 +1074,7 @@ AnimTask BattleAnim::effect(int id) {
     default:
         // Ids past the table (02:4364 has $18 entries) - never used by the game.
         if (std::find(unknownIds.begin(), unknownIds.end(), id) == unknownIds.end()) unknownIds.push_back(id);
-        if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM effect %02X not translated\n", id);
+        if (dbgEnv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM effect %02X not translated\n", id);
         for (int e = 16; e > 0; e--) {
             co_await wait(1);
             mem_[kBGP] = rb(uint16_t(0x4bc9 + ((e & 0x0c) >> 2)));

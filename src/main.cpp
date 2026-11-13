@@ -8,6 +8,7 @@
 //       M / Shift field menu (Equip, Items, Status, Save), F3 random battles on/off, F4 start a random battle here, F5 save / F9 load (ffl3.sav),
 //       Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
+#include "dbgenv.h"
 #include "render.h"
 #include "sound.h"
 #include "console.h"
@@ -242,7 +243,7 @@ int main(int argc, char** argv) {
         }
         ctx.vehicle = field.vehicle();
         ctx.area = field.encounterArea();
-        if (const char* a = std::getenv("FFL3_AREA"); a && *a) ctx.area = std::atoi(a);   // debug
+        if (const char* a = dbgEnv("FFL3_AREA"); a && *a) ctx.area = std::atoi(a);   // debug
         battle = std::make_unique<Battle>(rom, battleRam, party, ctx, hffca, battleSeed++ * 2654435761u);
         battle->onEvent = [](const std::string& l) { if (g_eventLog) g_eventLog(l); };
         battle->playSfx = [&](int id) { sndSfx(id); };
@@ -410,7 +411,7 @@ int main(int argc, char** argv) {
     text.log = [&](const std::string& m) { field.setLastEvent(m); };
     text.onEvent = [&](int cmd, int param) {
         field.runEventCommand(cmd, param);
-        if (std::getenv("FFL3_PARTYLOG") && (cmd == 0x10 || cmd == 0x1b || cmd == 0x22))
+        if (dbgEnv("FFL3_PARTYLOG") && (cmd == 0x10 || cmd == 0x1b || cmd == 0x22))
             for (size_t i = 0; i < party.size(); i++) std::fprintf(stderr, "  ev %02X %02X slot %zu: %02x %02x b3=%02x hp=%d\n", cmd, param, i, party[i].raw[0], party[i].raw[0x0d], party[i].raw[3], party[i].hp());
     };
 
@@ -530,11 +531,11 @@ int main(int argc, char** argv) {
             if (!battle || battle->finished()) return;
             battle->tick(in);
             if (++frameNo == shotAt && !shot.empty()) snap();
-            if (const char* d = std::getenv("FFL3_OAMLOG")) {   // debug / tests: each frame's OAM
+            if (const char* d = dbgEnv("FFL3_OAMLOG")) {   // debug / tests: each frame's OAM
                 static FILE* lf = std::fopen(d, "wb");
                 if (lf) { const BattleView v = battle->view(); std::fwrite(v.oam.data(), 1, 160, lf); std::fflush(lf); }
             }
-            if (const char* d = std::getenv("FFL3_FRAMES")) {   // debug: every frame to DIR/fNNNNN.bmp
+            if (const char* d = dbgEnv("FFL3_FRAMES")) {   // debug: every frame to DIR/fNNNNN.bmp
                 const std::string keep = shot;
                 char nm[64]; std::snprintf(nm, sizeof nm, "/f%05d.bmp", frameNo);
                 shot = std::string(d) + nm; snap(); shot = keep; shotDone = false;
@@ -779,16 +780,16 @@ int main(int argc, char** argv) {
                 std::printf("  step %c: %s\n", c, field.lastEvent().c_str()), field.setLastEvent("");
         }
         if (!savePath.empty() && !saveGame(savePath.c_str())) return 1;
-        if (std::getenv("FFL3_ATTRS")) {                     // debug: block attributes around the leader
+        if (dbgEnv("FFL3_ATTRS")) {                     // debug: block attributes around the leader
             const Actor& p = field.player();
             for (int r = p.row - 3; r <= p.row + 2; r++) {
                 for (int c = p.col - 4; c <= p.col + 4; c++) std::printf(" %02X/%02X", field.blockAt(r, c), field.attrAt(r, c));
                 std::printf("\n");
             }
         }
-        if (const char* vd = std::getenv("FFL3_VRAMDUMP")) {     // tests: VRAM $8000-$97FF after N hook frames
+        if (const char* vd = dbgEnv("FFL3_VRAMDUMP")) {     // tests: VRAM $8000-$97FF after N hook frames
             refreshTiles();
-            const int n = std::getenv("FFL3_HOOKFRAMES") ? std::atoi(std::getenv("FFL3_HOOKFRAMES")) : 0;
+            const int n = dbgEnv("FFL3_HOOKFRAMES") ? std::atoi(dbgEnv("FFL3_HOOKFRAMES")) : 0;
             for (int i = 0; i < n; i++) tiles.animate(field.header().hook, uint8_t(i));
             if (FILE* f = std::fopen(vd, "wb")) { std::fwrite(tiles.vram.data(), 1, tiles.vram.size(), f); std::fclose(f); }
         }
@@ -920,11 +921,11 @@ int main(int argc, char** argv) {
             if (n >= 4) field.enterMap(int(a), int(b), int(c)); else field.enterMap(int(a));
             return std::string("map ") + line.substr(4);
         }
-        if (k == "fx") { if (n >= 2) SDL_setenv("FFL3_FORCEFX", line.substr(3).c_str(), 1); else SDL_setenv("FFL3_FORCEFX", "", 1); return std::string("next attack plays sprite script ") + line.substr(2); }
-        if (k == "effect" && n >= 2) { SDL_setenv("FFL3_FORCEEFFECT", line.substr(7).c_str(), 1); return std::string("next attack plays effect ") + line.substr(7); }
-        if (k == "death" && n >= 2) { SDL_setenv("FFL3_DEATHSTYLE", line.substr(6).c_str(), 1); return std::string("monster deaths use style ") + line.substr(6); }
+        if (k == "fx") { if (n >= 2) setDbgEnv("FFL3_FORCEFX", line.substr(3).c_str()); else setDbgEnv("FFL3_FORCEFX", ""); return std::string("next attack plays sprite script ") + line.substr(2); }
+        if (k == "effect" && n >= 2) { setDbgEnv("FFL3_FORCEEFFECT", line.substr(7).c_str()); return std::string("next attack plays effect ") + line.substr(7); }
+        if (k == "death" && n >= 2) { setDbgEnv("FFL3_DEATHSTYLE", line.substr(6).c_str()); return std::string("monster deaths use style ") + line.substr(6); }
         if (k == "normal") {
-            for (const char* v : {"FFL3_FORCEFX", "FFL3_FORCEEFFECT", "FFL3_DEATHSTYLE", "FFL3_AREA", "FFL3_POKE"}) SDL_setenv(v, "", 1);
+            for (const char* v : {"FFL3_FORCEFX", "FFL3_FORCEEFFECT", "FFL3_DEATHSTYLE", "FFL3_AREA", "FFL3_POKE"}) setDbgEnv(v, "");
             return std::string("test settings back to normal");
         }
         if (k == "heal") {
@@ -932,7 +933,7 @@ int main(int argc, char** argv) {
             return std::string("party healed");
         }
         if (k == "flag" && n >= 3) { flags.event.set(a & 0xff, b != 0); return std::string("flag set"); }
-        if (k == "area") { SDL_setenv("FFL3_AREA", n >= 2 ? line.substr(5).c_str() : "", 1); return std::string("battles count as encounter area ") + line.substr(4); }
+        if (k == "area") { setDbgEnv("FFL3_AREA", n >= 2 ? line.substr(5).c_str() : ""); return std::string("battles count as encounter area ") + line.substr(4); }
         if (k == "hp1") { for (auto& r : party) { r.raw[0x10] = 1; r.raw[0x11] = 0; } return std::string("party at 1 HP"); }
         if (k == "music" && n >= 2) { sndMusic(int(a)); return std::string("music ") + line.substr(6); }
         if (k == "sfx" && n >= 2) { sndSfx(int(a)); return std::string("sound effect ") + line.substr(4); }
@@ -942,7 +943,7 @@ int main(int argc, char** argv) {
             field.runEventCommand(int(a), int(p2));
             return std::string("event ") + line.substr(6);
         }
-        if (k == "poke" && n >= 2) { SDL_setenv("FFL3_POKE", line.substr(5).c_str(), 1); return std::string("battle pokes ") + line.substr(5); }
+        if (k == "poke" && n >= 2) { setDbgEnv("FFL3_POKE", line.substr(5).c_str()); return std::string("battle pokes ") + line.substr(5); }
         return std::string("commands: battle XX | map XX [row col] | fx XX | effect XX | death N | area N | hp1 | poke A=V | normal | heal | flag XX 0/1 | music XX | sfx XX | event XX YY");
     };
     // ---- F7: test mode - every bit that needs checking, set up with one key ----
@@ -1237,7 +1238,7 @@ int main(int argc, char** argv) {
                 atFinish(timed && !done);
             } else atFinish(false);
             int next = atItem + 1;
-            if (const char* only = std::getenv("FFL3_AUTOTEST_ITEMS"); only && *only) {   // e.g. "5,9,12"
+            if (const char* only = dbgEnv("FFL3_AUTOTEST_ITEMS"); only && *only) {   // e.g. "5,9,12"
                 next = -1;
                 std::string o = std::string(",") + only + ",";
                 for (int j = atItem + 1; j < kNumTests && next < 0; j++)
@@ -1261,13 +1262,13 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(atDir, ec);
         atOn = true;
         int first = 0;
-        if (const char* only = std::getenv("FFL3_AUTOTEST_ITEMS"); only && *only) first = std::max(0, std::atoi(only) - 1);
+        if (const char* only = dbgEnv("FFL3_AUTOTEST_ITEMS"); only && *only) first = std::max(0, std::atoi(only) - 1);
         std::printf("FFL3 port %s autotest -> %s\n", FFL3_VERSION, atDir.c_str());
         atStart(first);
     }
     while (running && !atQuit) {
         SDL_Event e;
-        if (const char* inj = std::getenv("FFL3_INJECT")) {      // tests: "frame:Key frame:Key ..." key presses
+        if (const char* inj = dbgEnv("FFL3_INJECT")) {      // tests: "frame:Key frame:Key ..." key presses
             static std::vector<std::pair<uint64_t, SDL_Keycode>> evs;
             static bool parsed = false;
             if (!parsed) {
@@ -1431,7 +1432,7 @@ int main(int argc, char** argv) {
                                   (d == int(Dir::Right) ? BugLog::Right : 0) | (k[SDL_SCANCODE_M] || k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT] ? BugLog::Menu : 0)));
             if (field.lastEvent() != lastLogged) { lastLogged = field.lastEvent(); if (!lastLogged.empty()) logEvent(lastLogged); }
             if (toastFrames > 0 && --toastFrames == 0) toast.clear();
-            if (const char* tr = std::getenv("FFL3_SELFTEST"); tr && buglog.frameNo() == uint64_t(std::getenv("FFL3_SELFTEST_AT") ? std::atoi(std::getenv("FFL3_SELFTEST_AT")) : 120)) {   // packaging check
+            if (const char* tr = dbgEnv("FFL3_SELFTEST"); tr && buglog.frameNo() == uint64_t(dbgEnv("FFL3_SELFTEST_AT") ? std::atoi(dbgEnv("FFL3_SELFTEST_AT")) : 120)) {   // packaging check
                 std::printf("report: %s\n", writeReport(false).c_str());
                 if (std::string(tr) == "crash") std::raise(SIGSEGV);
                 running = false;

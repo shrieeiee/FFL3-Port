@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include "dbgenv.h"
 #include "battle.h"
 #include "uitext.h"
 #include "battlenatives.h"
@@ -213,7 +214,7 @@ bool Battle::native(uint16_t addr) {
         return false;
     case 0x1d77:                                       // after a defeat (0B:5CDF)
         vm_.mem[0xce88] = 2;
-        if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "1D77 ceda=%02X cc59=%02X\n", vm_.mem[0xceda], vm_.mem[0xcc59]);
+        if (dbgEnv("FFL3_ANIMLOG")) std::fprintf(stderr, "1D77 ceda=%02X cc59=%02X\n", vm_.mem[0xceda], vm_.mem[0xcc59]);
         if (vm_.mem[0xceda] != 0xff) { reviveParty(); return true; }   // story fight: carry on
         if (vm_.mem[0xcc59] == 0xc2) {                 // this one ends the game: 2 s, then the title
             timer_ = 120;
@@ -265,17 +266,17 @@ void Battle::reviveParty() {
 }
 
 bool Battle::startAnim(uint16_t entry) {
-    if (const char* fx = std::getenv("FFL3_FORCEFX"); fx && *fx && entry == 0x4000)   // debug: try a script
+    if (const char* fx = dbgEnv("FFL3_FORCEFX"); fx && *fx && entry == 0x4000)   // debug: try a script
         vm_.mem[0xc9bd] = uint8_t(0x80 | std::strtol(fx, nullptr, 16));
-    if (const char* fx = std::getenv("FFL3_FORCEEFFECT"); fx && *fx && entry == 0x4000) {   // debug: an effect id
+    if (const char* fx = dbgEnv("FFL3_FORCEEFFECT"); fx && *fx && entry == 0x4000) {   // debug: an effect id
         vm_.mem[0xc9bd] = uint8_t(std::strtol(fx, nullptr, 16) & 0x3f);
-        if (const char* p = std::getenv("FFL3_POKE"))     // ADDR=VAL,...
+        if (const char* p = dbgEnv("FFL3_POKE"))     // ADDR=VAL,...
             for (const char* q = p; *q;) {
                 char* e; const long a = std::strtol(q, &e, 16); const long v = std::strtol(e + 1, &e, 16);
                 vm_.mem[size_t(a)] = uint8_t(v); q = *e ? e + 1 : e;
             }
     }
-    if (std::getenv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9bd=%02X actor=%02X target=%02X\n", entry, m(0xde00), m(0xc9bd), m(0xc9d8), m(0xc9d6));
+    if (dbgEnv("FFL3_ANIMLOG")) std::fprintf(stderr, "ANIM %04X de00=%02X c9bd=%02X actor=%02X target=%02X\n", entry, m(0xde00), m(0xc9bd), m(0xc9d8), m(0xc9d6));
     {                                                  // the window as the GB has it at $9C00
         const BattleView cur = view();
         for (int r = 0; r < 10; r++)
@@ -764,7 +765,7 @@ BattleView Battle::view() const {
         v.lcdc[size_t(y)] = anim_.reg(y, 0xff40);
     }
     v.rawWindow = anim_.ownsWindow && anim_.busy();
-    if (std::getenv("FFL3_REGDUMP") && anim_.busy()) {
+    if (dbgEnv("FFL3_REGDUMP") && anim_.busy()) {
         std::fprintf(stderr, "REG raw=%d", v.rawWindow);
         for (int y = 0; y < 144; y += 8) std::fprintf(stderr, " %d:%02x/%02x/%02x/%02x", y, v.bgp[size_t(y)], v.wx[size_t(y)], v.wyReg[size_t(y)], v.scy[size_t(y)]);
         std::fprintf(stderr, "\n");
