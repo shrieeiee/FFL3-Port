@@ -116,7 +116,10 @@ AnimTask StoryPlayer::run() {
                         }
                     }
                     const int now = vert ? v_.row : v_.col;
-                    if (now != prev) { int dd = (now - prev) * sign; if (dd < -32) dd += 64; if (dd > 32) dd -= 64; moved += dd; prev = now; }
+                    if (now != prev) {
+                        int dd = (now - prev) * sign; if (dd < -32) dd += 64; if (dd > 32) dd -= 64;
+                        moved += dd; prev = now;
+                    }
                     if (++guard > 400) { fail(at + " wandering in " + t); co_return; }
                     co_await tick();
                 }

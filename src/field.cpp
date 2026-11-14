@@ -1,5 +1,7 @@
 #include "dbgenv.h"
 #include "field.h"
+
+#include <algorithm>
 #include "battledata.h"
 #include <cstdio>
 #include <cstdlib>
@@ -176,6 +178,7 @@ bool Field::objectPassable(int row, int col) const {
 
 void Field::setVehicle(int mode) {
     vehicle_ = mode;
+    if (mode >= 0 && mode < 6) leaderSpeed_ = rom_.b(0, uint16_t(0x87b + mode * 2));   // 00:08B5
     Actor& p = actors_[0];
     // 00:088C: modes 1-8 draw the leader from OBJ tile $20 / $28 / $10 (the Talon)
     static const uint8_t tile[9] = {0x00, 0x20, 0x28, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10};
@@ -348,12 +351,39 @@ void Field::tick(int dir) {
         }
         return;
     }
-    if (dir < 0 || busy()) return;
+    if (busy()) return;
+    if (!noClip && conveyor(dir)) return;
+    if (dir < 0) return;
     const Dir d = Dir(dir);
     p.facing = d;
     const int nr = p.row + kDr[dir], nc = p.col + kDc[dir];
     if (!noClip && (!passable(nr, nc) || (occupied(nr, nc, 0) && !tryPush(nr, nc, d)))) return;
-    startMove(0, d, true);
+    startMove(0, d, true, speedPx(leaderSpeed_));
+}
+
+// 01:4BF6: standing on a class $80 block, the floor carries the leader its way (attr & 3: up,
+// right, down, left) at speed index (attr >> 2) & 3 (00:017D: 1 2 4 8 px a frame). Holding
+// its way speeds up a notch (4D89), against it slows a notch (4D9C); sideways is an ordinary
+// step if there's room (4599 / 4520), else the floor carries on. True = handled.
+bool Field::conveyor(int dir) {
+    Actor& p = actors_[0];
+    const uint8_t under = attrAt(p.row, p.col);
+    if ((under & 0xc0) != 0x80) return false;
+    const int c = under & 3;
+    int s = (under >> 2) & 3;
+    if (dir >= 0) {
+        if (dir == c) s = std::min(3, s + 1);
+        else if (dir == (c ^ 2)) s = std::max(0, s - 1);
+        else {
+            const int nr = p.row + kDr[dir], nc = p.col + kDc[dir];
+            p.facing = Dir(dir);
+            if (passable(nr, nc) && !occupied(nr, nc, 0)) { startMove(0, Dir(dir), true, speedPx(leaderSpeed_)); return true; }
+        }
+    }
+    const int nr = p.row + kDr[c], nc = p.col + kDc[c];
+    if (!passable(nr, nc) || occupied(nr, nc, 0)) return true;      // 4645 fails: wCA30 = 1, stays put
+    startMove(0, Dir(c), true, speedPx(s));
+    return true;
 }
 
 void Field::onStepDone() {
@@ -420,7 +450,11 @@ void Field::actorCommand(int param) {
     case 0: case 1: case 2: case 3: a.facing = Dir(act); break;   // face
     case 4: a.id = 0; break;                                      // hide
     case 5: a.id = a.savedId; break;                              // show
-    default: break;                                               // 6/7: animation mode
+    case 6: case 7:                                               // 01:6748 / 675E: walk slow / fast
+        if (slot == 0) leaderSpeed_ = act - 6;                    // wC6F1
+        else a.speed = act == 6 ? 1 : 2;
+        break;
+    default: break;
     }
 }
 

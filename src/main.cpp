@@ -959,11 +959,17 @@ int main(int argc, char** argv) {
             if (n >= 4) field.enterMap(int(a), int(b), int(c)); else field.enterMap(int(a));
             return std::string("map ") + line.substr(4);
         }
+        if (k == "vehicle" && n >= 2) { field.setVehicle(int(a)); return std::string("vehicle ") + line.substr(8); }   // 0 = on foot
         if (k == "fx") { if (n >= 2) setDbgEnv("FFL3_FORCEFX", line.substr(3).c_str()); else setDbgEnv("FFL3_FORCEFX", ""); return std::string("next attack plays sprite script ") + line.substr(2); }
         if (k == "effect" && n >= 2) { setDbgEnv("FFL3_FORCEEFFECT", line.substr(7).c_str()); return std::string("next attack plays effect ") + line.substr(7); }
         if (k == "death" && n >= 2) { setDbgEnv("FFL3_DEATHSTYLE", line.substr(6).c_str()); return std::string("monster deaths use style ") + line.substr(6); }
+        if (k == "battles") {                                   // battles on / off (random encounters, like F3)
+            field.encounters = line.find("off") == std::string::npos;
+            return std::string(field.encounters ? "random battles on" : "random battles off");
+        }
         if (k == "normal") {
             for (const char* v : {"FFL3_FORCEFX", "FFL3_FORCEEFFECT", "FFL3_DEATHSTYLE", "FFL3_AREA", "FFL3_POKE"}) setDbgEnv(v, "");
+            field.encounters = true;
             return std::string("test settings back to normal");
         }
         if (k == "heal") {
@@ -991,7 +997,7 @@ int main(int argc, char** argv) {
         {"Panel lights", "map 10 22 12", "Talon cockpit room: panel lights and machinery animate like the real game", false},
         {"Sea animation", "map 01 20 20", "World map: the sea ripples (compare the real game)", false},
         {"Talon deck", "map 0b 26 7", "Walk down the hatch: fade out, white, fade in (about 1 s); A at the console inside opens the cockpit", false},
-        {"Sandstorm", "flag ae 0;flag ad 0;map 01 33 7", "Walk right into the middle of the desert spiral: the leader spins (and gets blown up and back), then 'Whoa, sandstorm!'", false},
+        {"Sandstorm", "battles off;flag ae 0;flag ad 0;map 01 33 7;vehicle 0", "Step right off the desert spiral's flow into its middle (the sand carries you outwards if you wait): the leader spins (and gets blown up and back), then 'Whoa, sandstorm!'", false},
         {"Flash event", "event 12 03", "Screen flashes white 4 times with a sound", false},
         {"Normal fight", "battle 00", "Party row walks; weapon sprites; numbers bounce; death dissolve", false},
         {"Auto Set", "battle 00", "Fight menu > Auto: toggle a member; they show Auto and skip choosing", false},
@@ -1072,7 +1078,7 @@ int main(int argc, char** argv) {
         {"Panel lights", "", 240, "TILES"},
         {"Sea animation", "", 240, "TILES"},
         {"Talon deck", "20:Down:20", 240, "entered map 10"},
-        {"Sandstorm", "20:Right:20", 600, "spin"},
+        {"Sandstorm", "1:Right:20 mash300", 900, "spin"},
         {"Flash event", "", 90, "FLASH"},
         {"Normal fight", "mash", 9000, "anim script|battle result won"},
         {"Auto Set", "90:Down 100:Down 110:A 125:A 140:B mash150", 9000, "auto set member 1 on|battle result"},
@@ -1268,13 +1274,13 @@ int main(int argc, char** argv) {
         bool done = false;
         if (nm == "Opening") done = atFrame > 120 && !opening && !prologue && !battle && !text.active() && !field.busy();
         else if (nm == "Fight again?") done = atSawBattle && !battle;
-        else if (std::string(kTests[atItem].setup).find("battle") != std::string::npos) done = atSawBattle && !battle && !text.active();
+        else if (std::string(kTests[atItem].setup).find("battle ") != std::string::npos) done = atSawBattle && !battle && !text.active();
         else done = atFrame >= limit;
         if (nm == "Fight again?" && opening == 1) done = true;  // "No" went to the title
         if (done || atFrame >= limit) {
             if (!done || atFrame >= limit) {
                 // items that just run for their time are done, not timed out
-                const bool timed = std::string(kTests[atItem].setup).find("battle") != std::string::npos || nm == "Opening";
+                const bool timed = std::string(kTests[atItem].setup).find("battle ") != std::string::npos || nm == "Opening";
                 atFinish(timed && !done);
             } else atFinish(false);
             int next = atItem + 1;

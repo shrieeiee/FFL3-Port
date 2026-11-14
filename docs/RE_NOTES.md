@@ -384,3 +384,13 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   it and one block the way they face (wC6EE: $00 up, $40 right, $80 down, $C0 left).
 - Step events fire once the step's counter wC6EF reaches 0, a few frames after the leader lines
   up (01:43F9 -> 00:08F3). The overworld loop doesn't run every frame.
+- Walking speed wC6F1: index into 00:017D (1 2 4 8 px/frame). From the vehicle table 00:087A
+  (on foot 0 = 1 px, 16 frames a block), and actor commands $6x / $7x (01:6748 / 675E: slow /
+  fast; other slots get their own speed). The port walked at 2 px.
+- Conveyors, 01:4BF6: on a class $80 block the floor moves the leader: direction attr & 3 (up,
+  right, down, left: step routines 01:44A8 / 4520 / 441D / 4599), speed index (attr >> 2) & 3.
+  Holding its way = a notch faster (4D89), against = a notch slower (4D9C), sideways = an
+  ordinary step if there's room. The Talon's walkway ($84/$88, patches 0B:79E0 4/5) and the
+  desert spiral round the sandstorm ($88-$8B, flowing outwards) are conveyors.
+- The Talon lift (event $25, 00:1A95): every other use flashes 4x, sfx $3E and re-lays the
+  walkway (patch 5 going up, 4 going down), then one forced step.

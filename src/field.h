@@ -175,6 +175,11 @@ private:
     // (wC804) before each move check; once the move is taken 01:4E48 keeps them ($47 on event
     // and open blocks). $47 when a map loads (01:4000).
     uint8_t leaderFlags_ = 0x47;
+    // wC6F1: the leader's walking speed, an index into 00:017D (1 2 4 8 px a frame). From the
+    // vehicle table 00:087A (on foot 0), or the actor commands $6x / $7x (01:6748 / 675E).
+    int leaderSpeed_ = 0;
+    static int speedPx(int idx) { return 1 << (idx & 3); }
+    bool conveyor(int dir);                                // 01:4BF6: class $80 blocks move you
     static uint8_t layerFlags(uint8_t f, uint8_t attr);   // 01:4EE1
     void settleLeaderFlags();                              // 01:4000 / 4E48 on the leader's block
     struct Return { int map, row, col; };

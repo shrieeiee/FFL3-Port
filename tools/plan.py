@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Plan a walk for a story route: shortest path on one map, printed as a `go` step.
 
-usage: plan.py saga3.gb MAP ROW,COL (ROW,COL | exit | out | event N[,N] | attr XX) [--show] [--grid FILE]
+usage: plan.py saga3.gb MAP ROW,COL (ROW,COL | exit | out | event N[,N] | attr XX | map XX) [--show] [--grid FILE]
+
+Exits that warp within the same map are followed (multi-floor maps like towers); pitfalls are
+only used when they're the way to the goal.
        plan.py saga3.gb - - TARGET --grid build/story/grid.txt   (map and start from the grid:
        the port writes it where a --story run ends)
 
@@ -41,6 +44,23 @@ else:
     h = r.map_header(m); g = r.gfxset(h['gfxset']); L = r.layout(h['layout'])
     A = [[block_attr(r, g['tileattr'], b & 0x7f) for b in row] for row in L['tiles']]
 H, W = len(A), len(A[0])
+
+# Exit table 06:6308[map] (00:13F1): an exit block warps by the 64 px region it's in; pitfalls
+# ($08/$09, 00:14B2) by the region of the block above. Dest = (b & $7F) + 5.
+EXITS = {}
+p_, e_ = r.ptr(6, 0x6308, m), r.ptr(6, 0x6308, m + 1)
+while p_ + 4 <= e_ and e_ - p_ <= 0x200:
+    b = [r.b(6, p_ + i) for i in range(4)]
+    EXITS[(b[0] >> 4, b[0] & 15)] = (b[1], (b[2] & 0x7f) + 5, (b[3] & 0x7f) + 5)
+    p_ += 4
+def warp(y, x):
+    """Where an event block sends you: (map, row, col) or None."""
+    a = A[y][x]
+    if (a & 0xc0) != 0xc0: return None
+    c = a & 0x3f
+    if c in (0, 1, 2, 3, 0x0a): return EXITS.get(((y >> 2) & 15, (x >> 2) & 15))
+    if c in (8, 9): return EXITS.get((((y - 1) % H >> 2) & 15, (x >> 2) & 15))
+    return None
 goal = [x for x in goal if x not in ('--show',)]
 
 def layer(f, a):                                # 01:4EE1
@@ -60,6 +80,8 @@ def is_goal(y, x):
     if goal[0] == 'attr': return A[y][x] == int(goal[1], 16)
     if goal[0] == 'event': return (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) in [int(v, 16) for v in goal[1].split(',')]
     if goal[0] == 'out': return (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) in (4, 5)
+    if goal[0] == 'map':                                  # an exit to another map
+        w = warp(y, x); return bool(w) and w[0] == int(goal[1], 16)
     gy, gx = map(int, goal[0].split(',')); return (y, x) == (gy, gx)
 
 D = [('U', -1, 0), ('D', 1, 0), ('L', 0, -1), ('R', 0, 1)]
@@ -70,7 +92,12 @@ end = None
 while q:
     y, x, f = q.popleft()
     if (y, x) != (sr, sc) and is_goal(y, x): end = (y, x, f); break
-    if (y, x) != (sr, sc) and (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) != 0x25: continue   # stop at events (not the lift)
+    if (y, x) != (sr, sc) and (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) != 0x25:
+        w = warp(y, x)                                    # same-map warp: carry on from where it lands
+        if w and w[0] == m and (w[1] % H, w[2] % W, 0x47) not in prev:
+            nxt = (w[1] % H, w[2] % W, 0x47)
+            prev[nxt] = ((y, x, f), '|'); q.append(nxt)
+        continue                                          # other events: stop
     for d, dy, dx in D:
         ny, nx = (y + dy) % H, (x + dx) % W
         ok, g = step(f, A[ny][nx])
@@ -85,9 +112,11 @@ path.reverse()
 end = end[:2]
 toks = []
 for d in path:
+    if d == '|': toks.append(['|', 0]); continue          # a warp: the next leg starts afresh
     if toks and toks[-1][0] == d: toks[-1][1] += 1
     else: toks.append([d, 1])
-print('go ' + ' '.join(f'{d}{n}' for d, n in toks) + f'   # -> {end[0]},{end[1]} attr {A[end[0]][end[1]]:02X}')
+legs = ' '.join(f'{d}{n}' if d != '|' else '|' for d, n in toks).split('|')
+print('\n'.join('go ' + l.strip() for l in legs if l.strip()) + f'   # -> {end[0]},{end[1]} attr {A[end[0]][end[1]]:02X}')
 if '--show' in sys.argv:
     for y in range(H):
         print(''.join('S' if (y, x) == (sr, sc) else 'G' if (y, x) == end else
