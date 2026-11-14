@@ -363,3 +363,11 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   redraw (00:18F5). OAM Y wraps, so the leader reappears at the bottom. Text waits.
   $12 $09 (00:1950): sfx $1F, the spin only. Emulator-checked by pointing event $23 (the
   cockpit console) at 00:1BD7 in a patched ROM copy.
+
+## Text window during scripted moves
+- Events $27/$28 (01:67F5 / 01:691E) start with 00:1B2D (save the LCD vectors wC0BC/wC0B9 to
+  wCA5A/wCA5D, install 11E3/11A2) and end with 00:1B50 (restore): the text window is off for
+  the whole walk. Event $12 $03's BGP = 0 whitens the window too. Checked on the prologue's
+  last lines (09:6015 tail: $32 02, $3D 12, $32 72, $38 03 flash, $3D 32, $32 42): the Elder's
+  blob walks off with no box. The leader is already at 0B 26,7 when the prologue ends; the
+  sprite is the back view (01:6BD2) although wC2D0 = $80.

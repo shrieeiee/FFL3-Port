@@ -801,7 +801,7 @@ int main(int argc, char** argv) {
         }
         if (!shot.empty()) {
             renderField(field, tiles, opts, frame, debug ? &tint : nullptr);
-            renderTextBox(text, tiles, opts, frame);
+            if (!field.scriptWalking()) renderTextBox(text, tiles, opts, frame);
             if (shop) renderShop(*shop, tiles, opts, frame);
             if (menu) renderMenu(*menu, tiles, opts, frame);
             if (console) renderConsole(*console, tiles, opts, frame);
@@ -1524,7 +1524,8 @@ int main(int argc, char** argv) {
             if (t < 10 && frozenValid && frozen.px.size() == frame.px.size()) frame = frozen;
             else if (t < 50) std::fill(frame.px.begin(), frame.px.end(), uint8_t(0));
             else renderField(field, tiles, fo, frame, debug ? &tint : nullptr);
-            if (t >= 50) renderTextBox(text, tiles, opts, frame);
+            // The window hides during a scripted walk, and goes white with the BG in a flash (BGP = 0).
+            if (t >= 50 && !field.scriptWalking() && !field.flashWhite()) renderTextBox(text, tiles, opts, frame);
             if (const int lv = field.fadeLevel(); lv)
                 for (uint8_t& px : frame.px) px = uint8_t(std::max(0, int(px) - lv));
             if (shop) renderShop(*shop, tiles, opts, frame);

@@ -168,5 +168,3 @@ straight through a hatch takes you back again, also like the real game.
 Nothing reachable. The game has a few leftover event codes ($10 $5/$8/$A/$C/$F, $12 $07 /
 $0D-$0F / $11) that no text, object or tile ever fires; if one ever shows a "Not done yet"
 notice, that's a bug worth reporting.
-
-The last few steps of the prologue walk on the Talon are placed rather than walked.

@@ -157,6 +157,8 @@ public:
         return t < 55 ? 2 : 1;
     }
     static constexpr int kTransition = 60;
+    // $27/$28 moves swap the LCD handlers for the walk (00:1B2D ... 1B50): no text window.
+    bool scriptWalking() const { return !walks_.empty(); }
     int leaderLift() const {           // screen pixels the leader is drawn above its spot
         if (!spin_ || !spin_->fling) return 0;
         const int k = spin_->frame;
