@@ -145,8 +145,51 @@ bool Field::occupied(int row, int col, int selfSlot) const {
     return false;
 }
 
+// 01:4B5E / 4BA7 on a block ahead (00:1060 loads its attr, 01:4EE1 the leader's flags for it).
+bool Field::jumpWall(int r, int c) const {
+    const uint8_t a = attrAt(r, c), cls = a & 0xc0;
+    const uint8_t x = (cls == 0xc0 || cls == 0x80) ? cls : a;
+    const uint8_t f = layerFlags(leaderFlags_, a);
+    if ((x & 8) && (f & 0xcb) == 9) return false;
+    if ((blockAt(r, c) & 0x40) != layer_) return false;
+    if (a == 0xeb || a == 0xc1 || a == 0xc3 || a == 0xc5 || a == 0xcc || a == 0xe4 || (a & 0x70) == 0x30) return false;
+    return (x & 3) == 3;                                              // a wall on both layers: jump on the spot
+}
+bool Field::jumpLand(int r, int c) const {
+    const uint8_t a = attrAt(r, c), cls = a & 0xc0;
+    const uint8_t x = (cls == 0xc0 || cls == 0x80) ? cls : a;
+    const uint8_t f = layerFlags(leaderFlags_, a);
+    if ((x & 8) && (f & 0x0b) == 9) return false;
+    if ((blockAt(r, c) & 0x40) != layer_) return false;
+    if (a == 0xeb || a == 0xc1 || a == 0xc3 || a == 0xc5 || a == 0xcc || a == 0xe4 || (a & 0x70) == 0x30) return false;
+    if (f & 7 & x) return false;
+    return !occupied(r, c, 0);                                        // 01:464F
+}
+
+bool Field::tryJump() {
+    Actor& p = actors_[0];
+    if (map_ < 0x0c || vehicle_ != 0 || busy() || p.moveFrames) return false;   // 00:07F8: on foot, map $0C on
+    if (playSfx) playSfx(0x39);
+    const Dir d = p.facing;
+    const int r1 = p.row + kDr[int(d)], c1 = p.col + kDc[int(d)];
+    const int r2 = r1 + kDr[int(d)], c2 = c1 + kDc[int(d)];
+    const uint8_t under = attrAt(p.row, p.col);
+    int kind;                                                         // 4A7F
+    if ((under & 0xf0) == 0x30 || (leaderFlags_ & 0x8b) == 0x09) kind = 0;
+    else if (jumpWall(r1, c1)) kind = 1;
+    else {
+        const bool l1 = jumpLand(r1, c1), l2 = jumpLand(r2, c2);
+        kind = l2 ? 3 : l1 ? 2 : 1;
+    }
+    if (kind == 0) { if (playSfx) playSfx(0x10); lastEvent_ = "can't jump here"; return true; }   // 48FF (the shake isn't done)
+    for (int i = 0; i < 32; i++) jumpHeight_[i] = int16_t(rom_.w(1, uint16_t(0x4a3f + i * 2)));
+    jump_ = Jump{0, kind == 3 ? 2 : kind == 2 ? 1 : 0, d, kind != 1};
+    lastEvent_ = kind == 1 ? "jump on the spot" : kind == 2 ? "hop a block" : "jump two blocks";
+    return true;
+}
+
 bool Field::busy() const {
-    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -300,6 +343,25 @@ void Field::tick(int dir) {
     if (trans_) { trans_--; return; }                    // fading: nothing moves
     for (Actor& a : actors_) a.animTick++;
     if (flash_) flash_--;
+    if (jump_) {                                                      // 01:4811.. / 4965: 1 px a frame
+        Jump& j = *jump_;
+        Actor& p = actors_[0];
+        if (p.moveFrames > 0) p.moveFrames--;
+        if (p.moveFrames == 0 && j.blocks > 0) {
+            j.blocks--;
+            p.dr = kDr[int(j.d)]; p.dc = kDc[int(j.d)];
+            p.row = wrap(p.row + p.dr, rows()); p.col = wrap(p.col + p.dc, cols());
+            p.speed = 1; p.moveFrames = 16; p.scripted = false;
+        }
+        if (++j.frame >= 32 && p.moveFrames == 0) {
+            const bool moved = j.moves;
+            jump_.reset();
+            layer_ = blockAt(p.row, p.col) & 0x40;
+            const uint8_t a = attrAt(p.row, p.col);                   // wCA56 = 1: the landing's step event
+            if (moved && (a & 0xc0) == 0xc0) runEventCommand(a & 0x3f, 0);
+        }
+        return;
+    }
     if (spin_) {
         static const Dir faces[4] = {Dir::Up, Dir::Right, Dir::Down, Dir::Left};   // 01:5292
         Actor& p = actors_[0];
@@ -592,10 +654,11 @@ void Field::runEventCommand(int cmd, int param) {
         return;
     case 0x1c: music = uint8_t(param); return;                          // 1a28
     case 0x1d: lastSfx = uint8_t(param); if (playSfx) playSfx(param); return;                        // 1a2e
-    case 0x08: case 0x09:                                              // 14b2: sound, slide, exit
+    case 0x08: case 0x09:                                              // 14b2: pitfall: sound, fall, exit
+        // 01:661C drops the leader a block (the down-step loop 445F) and moves the scroll back
+        // up 16 px, so the exit is the pitfall's own region (checked in the real game).
         if (playSfx) playSfx(0x3f);
-        p.row = wrap(p.row - 1, rows());                               // 01:661C: wC6E4 -= $10
-        if (!warpByExitTable()) p.row = wrap(p.row + 1, rows());
+        warpByExitTable();
         return;
     case 0x20:                                                         // 1a34: damage floor
         if (hurtParty) hurtParty();

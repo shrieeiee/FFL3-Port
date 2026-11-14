@@ -6,8 +6,9 @@ usage: story_emu.py saga3.gb route.txt out.log [--shots DIR] [--state-every N]
 The same step rules as the port's --story player (src/story.cpp), so the two logs can be
 diffed with tests/story_compare.py. Needs PyBoy (pip install pyboy).
 
-"Free" = the field main loop (00:0265) ran this frame, the leader stands on the block grid and
-no step is running (wC6EF = 0, 01:43F9) - the step event check (00:08F3) has had its turn.
+"Free" = the field loop got as far as reading a direction (00:07D6: after the step, the step
+events and the conveyor had nothing to do) in the last couple of frames, two frames running,
+and the leader stands on the block grid.
 While not free (text, battles, menus, map fades) the player mashes A, like the port's.
 """
 import sys, os, argparse
@@ -23,6 +24,10 @@ pb.set_emulation_speed(0)
 mem = pb.memory
 st = {'loop': False}
 pb.hook_register(0, 0x0265, lambda ctx: st.__setitem__('loop', True), None)
+# 00:07D6 is only reached once the step (01:43F9), the step events (00:08F3) and the conveyor
+# (01:4BF6) have all had their turn with nothing to do: the game is waiting for a direction.
+st['ready'] = -10
+pb.hook_register(0, 0x07d6, lambda ctx: st.__setitem__('ready', frame), None)
 if os.environ.get('STORY_TXT'):                           # debug: log every text the game opens (00:3211)
     pb.hook_register(0, 0x3211, lambda ctx: print(f'TXT frame {frame} bank {pb.memory[0x2000] if False else "?"}'), None)
 
@@ -53,7 +58,7 @@ def tick(keys=()):
     pb.tick(1, bool(a.shots))
     frame += 1
     s = state()
-    free_run = free_run + 1 if (st['loop'] and s['aligned']) else 0
+    free_run = free_run + 1 if (frame - st['ready'] <= 1 and s['aligned']) else 0
     return s
 
 def free(): return free_run >= 2
@@ -141,6 +146,14 @@ for ln, line in enumerate(steps, 1):
         if not mash_until_free(20000): fail(f'line {ln} stuck before A')
         tick(('a',)); tick(('a',)); tick(); tick()
         if not mash_until_free(20000): fail(f'line {ln} stuck after A')
+    elif op == 'jump':                                    # B: jump the way the leader faces
+        if not mash_until_free(20000): fail(f'line {ln} stuck before jump')
+        tick(('b',)); tick(('b',)); tick(); tick()
+        if not mash_until_free(20000): fail(f'line {ln} stuck after jump')
+    elif op == 'face':                                    # face D: turn without moving (a tap)
+        mash_until_free(20000)
+        tick((DIRS[w[1][0]],)); tick()
+        mash_until_free(20000)
     elif op == 'wait':
         for _ in range(int(w[1])): tick()
     elif op == 'keys':                                    # raw presses: A B S U D L R, wN = wait

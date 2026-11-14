@@ -144,6 +144,13 @@ private:
     // up the screen for 80 frames and back (wC210, the leader's screen Y; the camera stays put).
     struct Spin { int frame = 0; bool fling = false; Dir facing = Dir::Down; };
     std::optional<Spin> spin_;
+    // 01:47B2 jump: kind 1 = on the spot, 2 = hop a block, 3 = jump two (4A7F). 32 frames of
+    // arc (wCA13 counting down, height 01:4A3F), 1 px a frame; the landing gets its step event.
+    struct Jump { int frame = 0; int blocks = 0; Dir d = Dir::Down; bool moves = false; };
+    std::optional<Jump> jump_;
+    int jumpHeight_[32] = {};
+    bool jumpWall(int r, int c) const;     // 01:4B5E
+    bool jumpLand(int r, int c) const;     // 01:4BA7
     int trans_ = 0;                    // event $12 $03: 4 x (4 frames white, 4 normal)
     int spinClock_ = 0;                // free-running stand-in for hFF93 while spinning
 public:
@@ -162,10 +169,13 @@ public:
     // $27/$28 moves swap the LCD handlers for the walk (00:1B2D ... 1B50): no text window.
     bool scriptWalking() const { return !walks_.empty(); }
     int leaderLift() const {           // screen pixels the leader is drawn above its spot
+        if (jump_) return jumpHeight_[(31 - jump_->frame) & 31];
         if (!spin_ || !spin_->fling) return 0;
         const int k = spin_->frame;
         return 2 * (k < 80 ? k : 160 - k);
     }
+    // 01:47B2: B on foot, map $0C on: jump the way the leader faces. True if B was taken.
+    bool tryJump();
     bool flashWhite() const { return flash_ > 0 && ((flash_ - 1) / 4) % 2 == 1; }
 private:
     std::vector<Walk> walks_;          // queued scripted moves ($27/$28)

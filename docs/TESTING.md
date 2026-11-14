@@ -34,6 +34,11 @@ of what to look for.
 Marks are kept in `test_results.txt` next to the exe, so the list shows what's done between
 sessions.
 
+## New since the last build
+- B on foot (from the North Tower on) jumps the way you face: over pitfalls, or onto the next
+  block. Walking is the game's speed now (1 px a frame), and floors that move you (the Talon's
+  walkway, the desert spiral) carry you.
+
 ## Automatic test run
 **`run_autotest.bat`** (or `ffl3.exe --autotest`) plays through every test-mode item on its own:
 it sets each one up, presses the keys, and checks that the right thing happened (the battle

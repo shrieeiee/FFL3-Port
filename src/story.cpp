@@ -130,6 +130,17 @@ AnimTask StoryPlayer::run() {
             co_await tick(A); co_await tick(A); co_await tick(); co_await tick();
             co_await mashUntilFree(20000, false, &ok);
             if (!ok) { fail(at + " stuck after A"); co_return; }
+        } else if (op == "jump") {                                      // B: jump the way the leader faces
+            co_await mashUntilFree(20000, false, &ok);
+            if (!ok) { fail(at + " stuck before jump"); co_return; }
+            co_await tick(B); co_await tick(B); co_await tick(); co_await tick();
+            co_await mashUntilFree(20000, false, &ok);
+            if (!ok) { fail(at + " stuck after jump"); co_return; }
+        } else if (op == "face") {                                      // face D: turn without moving (a tap)
+            co_await mashUntilFree(20000, false, &ok);
+            co_await tick(dirKey(s.w.size() > 1 ? s.w[1][0] : 'D'));
+            co_await tick();
+            co_await mashUntilFree(20000, false, &ok);
         } else if (op == "wait") {
             const int n = s.w.size() > 1 ? std::atoi(s.w[1].c_str()) : 1;
             for (int i = 0; i < n; i++) co_await tick();

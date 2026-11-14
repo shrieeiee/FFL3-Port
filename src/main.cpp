@@ -1599,6 +1599,7 @@ int main(int argc, char** argv) {
                 if (aPressed && !field.player().moveFrames && field.boardTalon()) {}
                 else if (aPressed && !field.player().moveFrames) talk(rom, field, text, chest, openShop);
                 else if (bHeld && !bPrev && field.land()) {}            // B in the air: land (01:4250)
+                else if (bHeld && !bPrev && field.tryJump()) {}         // B on foot: jump (01:47B2)
                 else field.tick(d);
                 refreshTiles();
                 tiles.animate(field.header().hook, hff93);              // 01:54A0 in the field main loop

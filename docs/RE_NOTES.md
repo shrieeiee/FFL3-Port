@@ -394,3 +394,12 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   desert spiral round the sandstorm ($88-$8B, flowing outwards) are conveyors.
 - The Talon lift (event $25, 00:1A95): every other use flashes 4x, sfx $3E and re-lays the
   walkway (patch 5 going up, 4 going down), then one forced step.
+- Jump, 01:47B2 (on foot, map $0C on, B newly pressed; 00:07F8): sfx $39, the way the leader
+  faces. 4A7F decides: can't (48FF: sfx $10, shake, a message) if wCA51, the block under has
+  attr $3x, or the leader's flags & $8B = $09; on the spot (495E) if the block ahead is a wall
+  on both layers (4B5E); else jump two blocks if that lands (4BA7: same bridge layer as wCA12,
+  not $EB/$C1/$C3/$C5/$CC/$E4/$3x, no layer clash, no object), else hop one. 1 px a frame, the
+  arc from wCA13 ($1F / $9F counting down) and the height table 01:4A3F; the landing gets its
+  step event (wCA56 = 1). It's how the North Tower's pitfalls are crossed.
+- Pitfall ($08/$09, 00:14B2 -> 01:661C): sound $3F, the leader drops a block and the scroll goes
+  back up 16 px, then the exit table by the pitfall's own region.

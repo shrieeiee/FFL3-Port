@@ -21,3 +21,12 @@ check out_of_dharm
 == to the North Tower
 go L1 U7 L5 U8 R2 U1 R4 U7 L3 U1 L6 D4 R3  # north round the mountains to the tower door (13,32)
 check north_tower
+
+== North Tower, floor 1 to 2
+go U12                                # up the corridor and the room to the stairs (5,52)
+check tower_2f                        # up a floor: 10,30
+go U1 R1
+jump                                  # B: jump the pitfall at 9,32 (falling in drops you a floor)
+check over_the_pit
+go R4 U1 R1 U3                        # to the stairs at 5,38
+check tower_map33
