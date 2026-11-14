@@ -78,6 +78,8 @@ public:
     void runEventCommand(int cmd, int param);
     // True while a scripted actor move is animating (scripts wait for it).
     bool busy() const;
+    uint8_t vehicleMaskPublic() const { return vehicleMask(); }   // tools/plan.py (FFL3_GRID)
+    uint8_t leaderFlags() const { return leaderFlags_; }
 
     // Hooks the game layer provides.
     std::function<void(int bank, uint16_t addr)> openText;   // show a text (rst $a0 etc.)
@@ -169,7 +171,12 @@ private:
     std::vector<Walk> walks_;          // queued scripted moves ($27/$28)
     uint8_t layer_ = 0;
     int vehicle_ = 0;                  // wC6E3: 0 on foot in towns, 2 on foot on the world map
-    uint8_t leaderFlags_ = 0x45;       // wC804 = leader slot flags wC2E0 ($45 on foot, from RAM)
+    // wC2E0 for the leader: a height/layer state. 01:4EE1 works out the flags for a block
+    // (wC804) before each move check; once the move is taken 01:4E48 keeps them ($47 on event
+    // and open blocks). $47 when a map loads (01:4000).
+    uint8_t leaderFlags_ = 0x47;
+    static uint8_t layerFlags(uint8_t f, uint8_t attr);   // 01:4EE1
+    void settleLeaderFlags();                              // 01:4000 / 4E48 on the leader's block
     struct Return { int map, row, col; };
     std::vector<Return> returnStack_;  // wC7A0 / wC7C0
     Return saved_{-1, 0, 0};

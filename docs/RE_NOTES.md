@@ -371,3 +371,16 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   last lines (09:6015 tail: $32 02, $3D 12, $32 72, $38 03 flash, $3D 32, $32 42): the Elder's
   blob walks off with no box. The leader is already at 0B 26,7 when the prologue ends; the
   sprite is the back view (01:6BD2) although wC2D0 = $80.
+
+## Found by the story run (tests/story_compare.py)
+- EXP table wCD9D (0F:79D4 via 00:1E46): filled at a new game (01:7DC5) and when the guest stays
+  (0B:6E30); the battle's level-up test (0C:58AF) compares against it. Zero = level up on any EXP.
+- 01:5501 after a map load (00:0542): maps $0A/$0B build hook $0F's swirl frames by turning the
+  16x16 picture at $9060 a quarter at a time (01:5552, tile turn 01:5A18/5A44).
+- Leader layer flags wC2E0: 01:4EE1 works out wC804 from the target block before the move test
+  (00:1049 uses it), 01:4E48 keeps it once the move is taken ($47 on event/open blocks, $47 at
+  a map load). Plain ground ($01 on the overworld) is walkable with $46.
+- Return stack (00:13AC / 01:6578): push saves the door block itself; pop puts the leader back on
+  it and one block the way they face (wC6EE: $00 up, $40 right, $80 down, $C0 left).
+- Step events fire once the step's counter wC6EF reaches 0, a few frames after the leader lines
+  up (01:43F9 -> 00:08F3). The overworld loop doesn't run every frame.

@@ -6,7 +6,9 @@ usage: tests/run_all.py saga3.gb [--build build] [--battle-dumps DIR] [--rec-dum
 
 Suites that need dumps/recordings from the real game are skipped when the folder isn't given
 (they hold game data, so they're not in the repo). The in-game --autotest runs with SDL's
-dummy drivers and leaves its report in BUILD/autotest/results.html.
+dummy drivers and leaves its report in BUILD/autotest/results.html. The story suite plays
+tests/story/route.txt on the port and, if PyBoy is installed, on the real game too, and diffs
+the checkpoints (tests/story_compare.py).
 Exits 1 if anything failed."""
 import argparse, os, subprocess, sys, time
 
@@ -39,6 +41,7 @@ suites = [
                  None if a.vm_recs else 'needs --vm-recs'),
     ('tester',   [sys.executable, f'{here}/test_tester.py', exe, rom], None),
     ('autotest', [exe, rom, '--autotest'], None),
+    ('story',    [sys.executable, f'{here}/story_compare.py', rom, '--build', a.build], None),
 ]
 skip = set(filter(None, a.skip.split(',')))
 only = set(filter(None, a.only.split(',')))
@@ -47,6 +50,8 @@ def count(out):
     lines = out.splitlines()
     ok = sum(1 for l in lines if l.startswith(('ok ', 'PASS')) or ' PASS' in l)
     bad = sum(1 for l in lines if l.startswith('FAIL') or ' FAIL' in l)
+    for l in lines:   # story_compare: "7 checkpoints, all match"
+        if 'checkpoints, all match' in l: ok = int(l.split()[0])
     for l in lines:   # suites that print one summary line ("all 192 maps match")
         if l.startswith('all ') and ok == 0:
             ok = int(l.split()[1])

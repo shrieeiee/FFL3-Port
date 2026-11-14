@@ -63,6 +63,7 @@ int inventoryAdd(BattleRam& ram, uint8_t id) {
 Battle::Battle(const Rom& rom, BattleRam& ram, std::vector<CharRecord>& party, const BattleContext& ctx, int hffca, uint32_t seed)
     : rom_(rom), ram_(ram), party_(party), vm_(rom), anim_(rom, vm_.mem) {
     vm_.mem = ram_;
+    if (const char* w = dbgEnv("FFL3_VMWATCH"); w && *w) vm_.watch = uint16_t(std::strtol(w, nullptr, 16));
     anim_.random = [this](uint8_t n) { return rnd(n); };
     anim_.sfx = [this](int id) { if (playSfx) playSfx(id); };
     anim_.log = [this](const std::string& l) { if (onEvent) onEvent(l); };

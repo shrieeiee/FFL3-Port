@@ -79,6 +79,8 @@ bool Field::enterMap(int map, int row, int col, Dir facing) {
             }
     }
     layer_ = blockAt(p.row, p.col) & 0x40;
+    leaderFlags_ = 0x47;                                            // 01:4000, then 4E48 on the block
+    settleLeaderFlags();
     setVehicle(vehicle_);
     char buf[96];
     std::snprintf(buf, sizeof buf, "entered map %02X at %d,%d", map, p.row, p.col);
@@ -109,13 +111,25 @@ uint8_t Field::vehicleMask() const {
 // 00:1024 (leader) - NZ = blocked. Event blocks ($C0+) and $80-class blocks can be entered;
 // the event runs once the leader is on the block. Otherwise blocked when
 // attr & wC804 (leader flags) & wCA0F (vehicle mask) != 0.
+uint8_t Field::layerFlags(uint8_t f, uint8_t a) {
+    if (!(a & 0x4b)) f |= 3;                                       // 4EEC: plain ground: both layers
+    if ((f & 3) == 3 && (a & 3) && (a & 3) != 3) f = uint8_t((f & 0xfc) | ((a & 3) ^ 3));   // 4EF8
+    return uint8_t((f & 0xf7) | (a & 8));                          // 4F16: bit 3 from the block
+}
+
+void Field::settleLeaderFlags() {                                 // 4E48 / 4EC8
+    const uint8_t a = attrAt(actors_[0].row, actors_[0].col);
+    const uint8_t cls = a & 0xc0;
+    leaderFlags_ = (cls == 0xc0 || cls == 0x80) ? 0x47 : layerFlags(leaderFlags_, a);
+}
+
 bool Field::passable(int row, int col) const {
     const uint8_t a = attrAt(row, col);
     if (a == 0xeb) return false;
     if ((a & 0xc0) == 0xc0) return true;
     if ((a & 0xc0) == 0x80) return true;
     if (map_ < 6 && vehicle_ == 2) return (a & 0x40) != 0;      // 00:1058: the Talon at sea
-    return (a & 0x47 & leaderFlags_ & vehicleMask()) == 0;
+    return (a & 0x47 & layerFlags(leaderFlags_, a) & vehicleMask()) == 0;   // 00:1049 with 01:4EE1
 }
 
 bool Field::occupied(int row, int col, int selfSlot) const {
@@ -147,6 +161,7 @@ void Field::startMove(int slot, Dir d, bool turn, int speed) {
     a.wandering = false;
     a.scripted = false;
     a.moveFrames = 16 / speed;
+    if (slot == 0) settleLeaderFlags();                            // 01:4659 -> 4E48: the move is taken
 }
 
 // 00:0FFD: can an object step onto this block? Flags wC2E0 = $47, $45 for ordinary
@@ -414,8 +429,8 @@ void Field::runEventCommand(int cmd, int param) {
     if (dbgEnv("FFL3_EVLOG")) std::fprintf(stderr, "EV %02X %02X map %02X\n", cmd, param, map_);
     char buf[96];
     Actor& p = actors_[0];
-    auto pushReturn = [&] {
-        returnStack_.push_back({map_, wrap(p.row - p.dr, rows()), wrap(p.col - p.dc, cols())});
+    auto pushReturn = [&] {                                           // 13AC: where the leader stands (the door)
+        returnStack_.push_back({map_, p.row, p.col});
         if (returnStack_.size() > 8) returnStack_.erase(returnStack_.begin());
     };
     auto popReturn = [&] {
@@ -423,7 +438,8 @@ void Field::runEventCommand(int cmd, int param) {
         const Return r = returnStack_.back();
         returnStack_.pop_back();
         trans_ = kTransition;
-        enterMap(r.map, r.row, r.col, Dir::Down);
+        const Dir f = p.facing;                                        // 01:6578: back to the door, then one
+        enterMap(r.map, r.row + kDr[int(f)], r.col + kDc[int(f)], f);  // block the way the leader faces (wC6EE)
         lastEvent_ = "returned to previous map";
     };
     switch (cmd) {

@@ -149,3 +149,35 @@ void runMapHook(int hook, uint8_t t, uint8_t* vram8000) {
 }
 
 } // namespace ffl3
+
+namespace ffl3 {
+namespace {
+// 01:5A18 / 5A44: one 8x8 tile turned a quarter clockwise, a bitplane at a time:
+// out row j, bit p = in row p, bit 7 - j.
+void turnTile(const uint8_t* in, uint8_t* out) {
+    for (int plane = 0; plane < 2; plane++)
+        for (int j = 0; j < 8; j++) {
+            uint8_t b = 0;
+            for (int p = 7; p >= 0; p--) b = uint8_t(b << 1 | ((in[p * 2 + plane] >> (7 - j)) & 1));
+            out[j * 2 + plane] = b;
+        }
+}
+// 01:5552: the 16x16 picture at src (TL, BL = +$100, TR = +$10, BR = +$110) turned into dst.
+void turnPicture(uint8_t* v, int src, int dst) {
+    uint8_t t[4][16];
+    const int from[4] = {src, src + 0x100, src + 0x10, src + 0x110};           // C810 C820 C830 C840
+    for (int i = 0; i < 4; i++) for (int k = 0; k < 16; k++) t[i][k] = v[from[i] - 0x8000 + k];
+    const int to[4] = {dst + 0x10, dst, dst + 0x110, dst + 0x100};              // TL->TR, BL->TL, TR->BR, BR->BL
+    for (int i = 0; i < 4; i++) turnTile(t[i], &v[to[i] - 0x8000]);
+}
+} // namespace
+
+void mapLoadTiles(int map, uint8_t* v) {
+    if (map != 0x0a && map != 0x0b) return;
+    turnPicture(v, 0x9060, 0x9460);
+    turnPicture(v, 0x9460, 0x94a0);
+    turnPicture(v, 0x94a0, 0x94c0);
+    turnPicture(v, 0x94c0, 0x94e0);
+}
+
+} // namespace ffl3

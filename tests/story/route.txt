@@ -1,0 +1,23 @@
+# Story route for tests/story_compare.py (the port and the real game play it side by side).
+# Steps: see src/story.h. Walks are planned with tools/plan.py on the port's live map
+# (build/story/grid.txt, written where a --story run ends).
+
+== opening
+new                                   # title, names, the simulator battle, the prologue
+check after_opening                   # aboard the Talon (map 0B 26,7)
+
+== leave the Talon
+go U22                                # up the deck (the lift carries you) to the nose
+check off_talon                       # the temple top by Dharm (map 0A), the Talon a swirl
+go D12                                # down the stairs: the step text takes you outside
+check overworld                       # map 02 32,30
+
+== into Dharm
+go D1 R1 D2 R3 U1 R2 U2 R2            # round the trees to the town gate
+check dharm
+go D1                                 # straight back out of the gate
+check out_of_dharm
+
+== to the North Tower
+go L1 U7 L5 U8 R2 U1 R4 U7 L3 U1 L6 D4 R3  # north round the mountains to the tower door (13,32)
+check north_tower

@@ -21,6 +21,7 @@ void TileCache::build(const Rom& rom, const Field& f) {
     for (int i = 0; i < 128; i++) std::copy(f.objTiles()[i].begin(), f.objTiles()[i].end(), vram.begin() + i * 16);
     for (int i = 0; i < 256; i++)                 // BG tile numbers are signed: 0-127 at $9000
         std::copy(bgt[i].begin(), bgt[i].end(), vram.begin() + (i < 128 ? 0x1000 + i * 16 : 0x800 + (i - 128) * 16));
+    mapLoadTiles(f.mapId(), vram.data());                     // 01:5501
     decodeAll();
     map = f.mapId();
 }

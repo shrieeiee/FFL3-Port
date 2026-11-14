@@ -9,6 +9,7 @@
 //       Tab wide/GB view,
 //       PgUp/PgDn ([ / ]) previous/next map, P palette, F12 screenshot, Esc quit.
 #include "dbgenv.h"
+#include "story.h"
 #include "render.h"
 #include "sound.h"
 #include "console.h"
@@ -117,6 +118,7 @@ int dirFromChar(char c) {
 int main(int argc, char** argv) {
     std::string romPath = "saga3.gb", shot, dumpTiles, walk, savePath, loadPath;
     bool autotestArg = false;
+    std::string storyArg;                                 // --story ROUTE: play a story route, log checkpoints
     int runScript = -1;
     int textId = -1, runTextId = -1, battleArg = -1, shotAt = -1;
     std::string keys, dumpView, ramPokes;
@@ -136,7 +138,8 @@ int main(int argc, char** argv) {
         else if (a == "--walk" && i + 1 < argc) walk = argv[++i];
         else if (a == "--save" && i + 1 < argc) savePath = argv[++i];   // after --walk
         else if (a == "--load" && i + 1 < argc) loadPath = argv[++i];
-        else if (a == "--autotest") autotestArg = true;          // play every test-mode item, write autotest/
+        else if (a == "--autotest") autotestArg = true;
+        else if (a == "--story" && i + 1 < argc) storyArg = argv[++i];          // play every test-mode item, write autotest/
         else if (a == "--text" && i + 1 < argc) textId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-text" && i + 1 < argc) runTextId = int(std::strtol(argv[++i], nullptr, 16));
         else if (a == "--run-script" && i + 1 < argc) runScript = int(std::strtol(argv[++i], nullptr, 16));   // BAAAA: bank B, address AAAA
@@ -280,6 +283,20 @@ int main(int argc, char** argv) {
     field.giveItem = [&](int item) { receive(item); };
     // Save file: "FFL3SAV1", map, row, col, facing, vehicle, event + chest flags (32 bytes
     // each, MSB first), 5 party records, then the whole battle RAM image (inventory etc.).
+    // 0F:79D4 (00:1E46): EXP each of members 0-3 needs for the next level -> wCD9D + 3i,
+    // (level + 4) * (level + 1)^2, 0 at level 99. The battle's level-up check (0C:58AF) reads it;
+    // the game refreshes it at a new game (01:7DC5), when the guest stays (0B:6E30) and after
+    // each level-up (the VM's native 1E46).
+    auto refreshExpTable = [&] {
+        for (int i = 0; i < 4; i++) {
+            const int off = rom.b(0, uint16_t(0x1fe3 + i * 2)) | rom.b(0, uint16_t(0x1fe4 + i * 2)) << 8;
+            const int m = off / 0x60;
+            const uint8_t lv = m >= 0 && m < int(party.size()) ? party[size_t(m)].raw[3] : 0x63;
+            uint32_t need = 0;
+            if (lv != 0x63) need = uint32_t(lv + 4) * uint32_t((lv + 1) * (lv + 1));
+            for (int k = 0; k < 3; k++) battleRam[size_t(0xcd9d + i * 3 + k)] = uint8_t(need >> (8 * k));
+        }
+    };
     auto saveGame = [&](const char* path) {
         FILE* f = std::fopen(path, "wb");
         if (!f) return false;
@@ -331,6 +348,7 @@ int main(int argc, char** argv) {
             if (c.raw[3] != 0xff || i < 4) party.push_back(c);
         }
         battleRam = tmp;
+        refreshExpTable();                                // saves from before this fix have it 0
         battle.reset();
         text.close();
         field.setSavedSpot({battleRam[0xc6ed], (battleRam[0xc6e9] | battleRam[0xc6ea] << 8) / 16 + 5,
@@ -358,6 +376,7 @@ int main(int argc, char** argv) {
         if (slot == 3 && who == 6) {
             party[3] = party[4];
             party[3].raw[3] = rom.b(7, 0x7ba4);
+            refreshExpTable();                                      // 0B:6E30
         } else {
             party[size_t(slot)] = loadCharacter(rom, rom.b(0x0b, uint16_t(0x7573 + who)));
         }
@@ -455,6 +474,7 @@ int main(int argc, char** argv) {
         if (namingMember < 3) { startNaming(namingMember + 1); return; }
         naming.reset();
         party[4] = party[3];                              // 7DB3: wC620 -> wC680
+        refreshExpTable();                                // 01:7DC5
         field.joinParty(3, 2);                            // 0B:6DE4 (a = 3, b = 2)
         field.leaveParty(4);                              // 0B:6E33 (a = 4)
         text.open(9, 0x6015);                             // the prologue (00:0250)
@@ -494,6 +514,23 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> tint;
     int tilesVersion = -1;
     uint8_t hff93 = 0;                                       // frame counter (00:11CE)
+    // tools/plan.py input: the live map's blocks / attributes, the leader's layer flags and the
+    // vehicle mask, and where the visible objects stand.
+    auto writeGrid = [&](const std::string& path) {
+        FILE* gf = std::fopen(path.c_str(), "w");
+        if (!gf) return;
+        std::fprintf(gf, "map %02X rows %d cols %d mask %02X flags %02X vehicle %d pos %d,%d\n", field.mapId(), field.rows(), field.cols(),
+                     field.vehicleMaskPublic(), field.leaderFlags(), field.vehicle(), field.player().row, field.player().col);
+        for (int r = 0; r < field.rows(); r++) {
+            for (int c = 0; c < field.cols(); c++) std::fprintf(gf, "%s%02X/%02X", c ? " " : "", field.blockAt(r, c), field.attrAt(r, c));
+            std::fprintf(gf, "\n");
+        }
+        for (int i = 1; i < Field::kSlots; i++) {
+            const Actor& a = field.actors()[size_t(i)];
+            if (a.visible()) std::fprintf(gf, "obj %d,%d\n", a.row, a.col);
+        }
+        std::fclose(gf);
+    };
     auto refreshTiles = [&] {
         if (tiles.map != field.mapId() || tilesVersion != field.blocksVersion()) {
             tiles.build(rom, field);
@@ -780,6 +817,7 @@ int main(int argc, char** argv) {
                 std::printf("  step %c: %s\n", c, field.lastEvent().c_str()), field.setLastEvent("");
         }
         if (!savePath.empty() && !saveGame(savePath.c_str())) return 1;
+        if (const char* gp = dbgEnv("FFL3_GRID")) writeGrid(gp);   // tools/plan.py: the live map
         if (dbgEnv("FFL3_ATTRS")) {                     // debug: block attributes around the leader
             const Actor& p = field.player();
             for (int r = p.row - 3; r <= p.row + 2; r++) {
@@ -1268,6 +1306,60 @@ int main(int argc, char** argv) {
         std::printf("FFL3 port %s autotest -> %s\n", FFL3_VERSION, atDir.c_str());
         atStart(first);
     }
+    // --story: results in story/ next to the exe (log.txt + a screenshot per checkpoint)
+    StoryPlayer story;
+    const bool storyOn = !storyArg.empty();
+    std::string storyDir;
+    FILE* storyLog = nullptr;
+    if (storyOn) {
+        std::string err;
+        if (!story.load(storyArg, err)) { std::fprintf(stderr, "%s\n", err.c_str()); return 2; }
+        storyDir = (std::filesystem::path(exeDir) / "story").string();
+        std::error_code ec;
+        std::filesystem::remove_all(storyDir, ec);
+        std::filesystem::create_directories(storyDir, ec);
+        storyLog = std::fopen((std::filesystem::path(storyDir) / "log.txt").string().c_str(), "w");
+        std::printf("FFL3 port %s story %s -> %s\n", FFL3_VERSION, storyArg.c_str(), storyDir.c_str());
+        story.onLine = [&](const std::string& line, const std::string& label) {
+            std::printf("%s\n", line.c_str());
+            std::fflush(stdout);
+            if (storyLog) { std::fprintf(storyLog, "%s\n", line.c_str()); std::fflush(storyLog); }
+            logEvent("STORY " + line);
+            if (!argb.empty()) saveBmp(argb, frame.w, frame.h, (std::filesystem::path(storyDir) / (label + ".bmp")).string().c_str());
+        };
+    }
+    auto storyView = [&] {
+        StoryView v;
+        const Actor& p = field.player();
+        v.loop = !opening && !prologue && !battle && !shop && !menu && !console && !text.active() &&
+                 !field.busy() && field.transition() == 0;
+        v.free = v.loop && p.moveFrames == 0;
+        v.map = field.mapId(); v.row = p.row; v.col = p.col;
+        char b[8];
+        for (int i = 0; i < 32; i++) {
+            int byte = 0;
+            for (int k = 0; k < 8; k++) if (flags.event.test(size_t(i * 8 + k))) byte |= 0x80 >> k;
+            std::snprintf(b, sizeof b, "%02x", byte); v.flags += b;
+        }
+        for (size_t i = 0; i < 4 && i < party.size(); i++)
+            v.party += (i ? " " : "") + std::to_string(party[i].hp()) + "/" + std::to_string(party[i].maxHp());
+        if (dbgEnv("FFL3_STORYOBJ"))                              // debug: the actors too
+            for (int i = 0; i < Field::kSlots; i++) {
+                const Actor& a = field.actors()[size_t(i)];
+                if (!a.used) continue;
+                char ob[96];
+                std::snprintf(ob, sizeof ob, "\n  slot %d id %02X at %d,%d tile %02X kind %d sprite %02X%s", i, a.id, a.row, a.col,
+                              a.spriteTile, a.obj.kind, a.obj.sprite, a.drawn() ? "" : " (hidden)");
+                v.party += ob;
+            }
+        if (dbgEnv("FFL3_STORYREC"))                              // debug: the raw records too
+            for (size_t i = 0; i < 4 && i < party.size(); i++) {
+                v.party += "\n  rec" + std::to_string(i) + " ";
+                for (int j = 0; j < 0x60; j++) { std::snprintf(b, sizeof b, "%02x", party[i].raw[size_t(j)]); v.party += b; }
+            }
+        return v;
+    };
+
     while (running && !atQuit) {
         SDL_Event e;
         if (const char* inj = dbgEnv("FFL3_INJECT")) {      // tests: "frame:Key frame:Key ..." key presses
@@ -1403,7 +1495,7 @@ int main(int argc, char** argv) {
         acc += double(now - last) / double(SDL_GetPerformanceFrequency());
         last = now;
         if (acc > 0.25) acc = 0.25;
-        if (atItem >= 0) acc = 1.0 / 60.0;                   // --autotest: one frame per loop, as fast as it goes
+        if (atItem >= 0 || storyOn) acc = 1.0 / 60.0;        // --autotest / --story: one frame per loop, as fast as it goes
         int steps = 0;                                           // logic frames this time round (for capture)
         while (acc >= 1.0 / 60.0) {
             acc -= 1.0 / 60.0;
@@ -1415,6 +1507,18 @@ int main(int argc, char** argv) {
                 std::memset(synth, 0, sizeof synth);
                 atKeys(synth);
                 k = synth;
+            } else if (storyOn) {                                // --story drives the keys
+                std::memset(synth, 0, sizeof synth);
+                const uint8_t sk = story.frame(storyView());
+                if (sk & StoryPlayer::Up) synth[SDL_SCANCODE_UP] = 1;
+                if (sk & StoryPlayer::Down) synth[SDL_SCANCODE_DOWN] = 1;
+                if (sk & StoryPlayer::Left) synth[SDL_SCANCODE_LEFT] = 1;
+                if (sk & StoryPlayer::Right) synth[SDL_SCANCODE_RIGHT] = 1;
+                if (sk & StoryPlayer::A) synth[SDL_SCANCODE_Z] = 1;
+                if (sk & StoryPlayer::B) synth[SDL_SCANCODE_X] = 1;
+                if (sk & StoryPlayer::Start) synth[SDL_SCANCODE_RETURN] = 1;
+                k = synth;
+                if (story.finished()) { writeGrid((std::filesystem::path(storyDir) / "grid.txt").string()); running = false; }
             }
             int d = -1;
             if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) d = int(Dir::Down);
@@ -1596,7 +1700,8 @@ int main(int argc, char** argv) {
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
         SDL_RenderClear(ren);
         SDL_RenderCopy(ren, tex, nullptr, nullptr);
-        if (atItem < 0 || atFrame % 8 == 0) SDL_RenderPresent(ren);   // autotest: show every 8th frame
+        if ((atItem < 0 && !storyOn) || (atItem >= 0 && atFrame % 8 == 0) || (storyOn && story.frames() % 32 == 0))
+            SDL_RenderPresent(ren);                              // autotest: every 8th frame, story: every 32nd
 
         char title[200];
         std::snprintf(title, sizeof title, "FFL3 - map %02X (%d,%d)%s%s - %s", field.mapId(),
@@ -1611,6 +1716,8 @@ int main(int argc, char** argv) {
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
+    if (storyLog) std::fclose(storyLog);
+    if (storyOn) return story.finished() && !story.failed() ? 0 : 1;
     if (autotestArg) {
         int fails = 0;
         for (auto& r : atResults) fails += r.verdict != "PASS";

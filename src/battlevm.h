@@ -8,6 +8,7 @@
 // left side, wCC0F/10 VM stack pointer (stack from wCC11). Variables: wC900-C9FF.
 // See tools/battlevm.py for the instruction set.
 #pragma once
+#include <cstdio>
 #include "rom.h"
 #include <array>
 #include <cstdint>
@@ -25,7 +26,12 @@ public:
 
     uint8_t rd(uint16_t a) const;
     uint16_t rd16(uint16_t a) const { return uint16_t(rd(a) | rd(uint16_t(a + 1)) << 8); }
-    void wr(uint16_t a, uint8_t v) { if (a == 0xffbc && onSfx) onSfx(v); if (a >= 0x8000) { mem[a] = v; if (written) written[a] = 1; } }
+    void wr(uint16_t a, uint8_t v) {
+        if (a == 0xffbc && onSfx) onSfx(v);
+        if (a == watch && watch) std::fprintf(stderr, "VMWATCH %04X <- %02X (was %02X) vm pc %04X\n", a, v, mem[a], de_);
+        if (a >= 0x8000) { mem[a] = v; if (written) written[a] = 1; }
+    }
+    uint16_t watch = 0;                       // debug (FFL3_VMWATCH): log writes to this address
     // Debug: when set, reads of RAM not yet written since start() are counted in uninit[].
     uint8_t* written = nullptr;
     uint32_t* uninit = nullptr;
