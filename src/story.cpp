@@ -141,6 +141,8 @@ AnimTask StoryPlayer::run() {
             co_await tick(dirKey(s.w.size() > 1 ? s.w[1][0] : 'D'));
             co_await tick();
             co_await mashUntilFree(20000, false, &ok);
+        } else if (op == "battles") {                                   // random encounters on / off
+            if (onCommand) onCommand("battles " + (s.w.size() > 1 ? s.w[1] : std::string("on")));
         } else if (op == "wait") {
             const int n = s.w.size() > 1 ? std::atoi(s.w[1].c_str()) : 1;
             for (int i = 0; i < n; i++) co_await tick();

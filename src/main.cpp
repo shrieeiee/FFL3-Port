@@ -426,6 +426,8 @@ int main(int argc, char** argv) {
         receive(rom.b(3, uint16_t(0x762a + k)));
         flags.chest.set(size_t(k));
         field.openChest(slot);
+        if (o.id >= 0x61)                                        // 0A13 -> 0F:7C74: story items set a flag
+            flags.event.set(rom.b(0xf, uint16_t(0x7c7e + o.id - 0x61)));   // (Float: $44)
     };
     text.log = [&](const std::string& m) { field.setLastEvent(m); };
     text.onEvent = [&](int cmd, int param) {
@@ -1334,6 +1336,7 @@ int main(int argc, char** argv) {
             if (!argb.empty()) saveBmp(argb, frame.w, frame.h, (std::filesystem::path(storyDir) / (label + ".bmp")).string().c_str());
         };
     }
+    story.onCommand = [&](const std::string& c) { runCommand(c); };
     auto storyView = [&] {
         StoryView v;
         const Actor& p = field.player();
@@ -1342,11 +1345,12 @@ int main(int argc, char** argv) {
         v.free = v.loop && p.moveFrames == 0;
         v.map = field.mapId(); v.row = p.row; v.col = p.col;
         char b[8];
-        for (int i = 0; i < 32; i++) {
-            int byte = 0;
-            for (int k = 0; k < 8; k++) if (flags.event.test(size_t(i * 8 + k))) byte |= 0x80 >> k;
-            std::snprintf(b, sizeof b, "%02x", byte); v.flags += b;
-        }
+        for (const auto* bits : {&flags.event, &flags.chest})     // wC760 and wC780, 32 bytes each
+            for (int i = 0; i < 32; i++) {
+                int byte = 0;
+                for (int k = 0; k < 8; k++) if (bits->test(size_t(i * 8 + k))) byte |= 0x80 >> k;
+                std::snprintf(b, sizeof b, "%02x", byte); v.flags += b;
+            }
         for (size_t i = 0; i < 4 && i < party.size(); i++)
             v.party += (i ? " " : "") + std::to_string(party[i].hp()) + "/" + std::to_string(party[i].maxHp());
         if (dbgEnv("FFL3_STORYOBJ"))                              // debug: the actors too

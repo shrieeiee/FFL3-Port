@@ -5,6 +5,9 @@
 == opening
 new                                   # title, names, the simulator battle, the prologue
 check after_opening                   # aboard the Talon (map 0B 26,7)
+battles off                           # random battles differ between the two (and can wipe the
+                                      # party): the route is about places and story; battles have
+                                      # their own tests
 
 == leave the Talon
 go U22                                # up the deck (the lift carries you) to the nose
@@ -30,3 +33,12 @@ jump                                  # B: jump the pitfall at 9,32 (falling in 
 check over_the_pit
 go R4 U1 R1 U3                        # to the stairs at 5,38
 check tower_map33
+
+== North Tower, floor 3: Float
+go U1 L2 D7 L9 U2 R1
+jump
+go U3                                 # the stairs warp to 28,58
+go U4
+face R
+a                                     # the chest: Float
+check float

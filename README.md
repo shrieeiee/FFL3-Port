@@ -211,7 +211,7 @@ need dumps from the real game skip when the folder isn't given.
   (`ffl3 saga3.gb --story ROUTE`, log + a screenshot per checkpoint in `story/`) and on the real
   game in PyBoy (`tools/story_emu.py`), and diffs every checkpoint: map, position, event flags
   and the screen. Routes are walked with `tools/plan.py` on the port's live map
-  (`story/grid.txt`, written where a story run ends). Currently: new game to the North Tower.
+  (`story/grid.txt`, written where a story run ends). Currently: new game to Float at the top of the North Tower.
 - `ffl3 saga3.gb --autotest` – plays every test-mode item with scripted keys under its own
   pacing, checks the expected log line / VRAM change / flash / sound / save round trip, and
   writes `autotest/results.html` (per-item AVI + snapshots). `FFL3_AUTOTEST_ITEMS=1,9`

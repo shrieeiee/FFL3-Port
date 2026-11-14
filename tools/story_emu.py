@@ -47,6 +47,7 @@ def state():
     return {'map': mem[0xc6e8], 'row': last_pos['row'], 'col': last_pos['col'], 'aligned': aligned}
 
 free_run = 0
+no_battles = [False]
 def tick(keys=()):
     """One frame with these buttons held; tracks how many frames in a row we've been free."""
     global frame, free_run
@@ -55,6 +56,7 @@ def tick(keys=()):
     for k in keys:
         if k not in held: pb.button_press(k); held.add(k)
     st['loop'] = False
+    if no_battles[0]: mem[0xca2b] = 0                    # 01:4617: rate 0 = no random battles
     pb.tick(1, bool(a.shots))
     frame += 1
     s = state()
@@ -63,8 +65,8 @@ def tick(keys=()):
 
 def free(): return free_run >= 2
 
-def flags():
-    return bytes(mem[0xc760 + i] for i in range(32)).hex()
+def flags():                                              # event flags wC760, chest flags wC780
+    return bytes(mem[0xc760 + i] for i in range(64)).hex()
 
 def party():
     out = []
@@ -154,6 +156,8 @@ for ln, line in enumerate(steps, 1):
         mash_until_free(20000)
         tick((DIRS[w[1][0]],)); tick()
         mash_until_free(20000)
+    elif op == 'battles':                                 # random encounters on / off
+        no_battles[0] = len(w) > 1 and w[1] == 'off'
     elif op == 'wait':
         for _ in range(int(w[1])): tick()
     elif op == 'keys':                                    # raw presses: A B S U D L R, wN = wait

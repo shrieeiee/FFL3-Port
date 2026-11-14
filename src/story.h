@@ -3,7 +3,7 @@
 // and logs a checkpoint line per check / expect. tools/story_emu.py plays the same file on the
 // real game (PyBoy) with the same rules; tests/story_compare.py diffs the two logs.
 //
-// Steps: new | go D3 L2 ... | a | jump | face D | wait N | keys A B S U D L R wN | settle | check LABEL |
+// Steps: new | go D3 L2 ... | a | jump | face D | battles on|off | wait N | keys A B S U D L R wN | settle | check LABEL |
 //        expect map MM [row col] | == section name.   '#' starts a comment.
 // While the game isn't free (text, battle, menus, fades) the player mashes A.
 #include <cstdint>
@@ -31,6 +31,7 @@ public:
     bool finished() const { return done_; }
     bool failed() const { return failed_; }
     std::function<void(const std::string& line, const std::string& label)> onLine;   // CHECK / FAIL / DONE
+    std::function<void(const std::string& cmd)> onCommand;                          // 'battles off' etc.
     uint64_t frames() const { return frame_; }
 
 private:
