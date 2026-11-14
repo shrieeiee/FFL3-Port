@@ -6,6 +6,7 @@
 #pragma once
 #include "flags.h"
 #include "mapdata.h"
+#include <optional>
 #include <functional>
 #include <string>
 
@@ -136,7 +137,13 @@ private:
     struct Glide { int frames; int slot[2]; Dir dir[2]; };
     std::vector<Glide> glides_;
     int flash_ = 0;
+    // Events $12 $08/$09 (00:190D / 1950): the leader spins for 160 frames, facing from
+    // 01:53FF (frame counter >> 3 & 3: up, right, down, left). $08 also flings them 2 px a frame
+    // up the screen for 80 frames and back (wC210, the leader's screen Y; the camera stays put).
+    struct Spin { int frame = 0; bool fling = false; Dir facing = Dir::Down; };
+    std::optional<Spin> spin_;
     int trans_ = 0;                    // event $12 $03: 4 x (4 frames white, 4 normal)
+    int spinClock_ = 0;                // free-running stand-in for hFF93 while spinning
 public:
     // A map change seen on screen (00:39F3 fade out, the load, 00:3A0C fade in): 60 frames,
     // the game frozen. Level 0-3 of the fade table wCDB4 (D2/D0/90, 81/80/40, 40/40/00, 0).
@@ -150,6 +157,11 @@ public:
         return t < 55 ? 2 : 1;
     }
     static constexpr int kTransition = 60;
+    int leaderLift() const {           // screen pixels the leader is drawn above its spot
+        if (!spin_ || !spin_->fling) return 0;
+        const int k = spin_->frame;
+        return 2 * (k < 80 ? k : 160 - k);
+    }
     bool flashWhite() const { return flash_ > 0 && ((flash_ - 1) / 4) % 2 == 1; }
 private:
     std::vector<Walk> walks_;          // queued scripted moves ($27/$28)

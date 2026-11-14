@@ -135,6 +135,7 @@ void TextBox::step() {
     // Execute bytes until a glyph is shown (typewriter), or we block on input.
     for (int guard = 0; guard < 512 && state_ == State::Run; guard++) {
         if (waitEvent_) return;
+        if (isBusy && isBusy()) return;          // an event started a move/effect: the game runs it to the end first
         const int v = next();
         if (v < 0) { finish(); return; }
         const uint8_t b = uint8_t(v);

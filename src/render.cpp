@@ -140,6 +140,10 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
     if (!p.id) return;                                // hidden (event $12 $00, actor command 4x)
     int sx, sy, tile; bool flip;
     screenPos(p, sx, sy);
+    if (const int lift = f.leaderLift()) {            // events $12 $08: OAM Y wraps at 256
+        const int top = out.h / 2 - 72;               // where the GB screen's row 0 sits
+        sy = (((sy - lift - top + 16) & 255) - 16) + top;
+    }
     frameFor(p, p.spriteTile, tile, flip);
     drawSprite(tc, o.obp, out, sx, sy, tile, flip);
 }

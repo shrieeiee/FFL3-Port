@@ -130,7 +130,7 @@ bool Field::occupied(int row, int col, int selfSlot) const {
 }
 
 bool Field::busy() const {
-    if (!walks_.empty() || !glides_.empty() || flash_ || trans_) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -282,6 +282,13 @@ void Field::tick(int dir) {
     if (trans_) { trans_--; return; }                    // fading: nothing moves
     for (Actor& a : actors_) a.animTick++;
     if (flash_) flash_--;
+    if (spin_) {
+        static const Dir faces[4] = {Dir::Up, Dir::Right, Dir::Down, Dir::Left};   // 01:5292
+        Actor& p = actors_[0];
+        if (++spin_->frame >= 160) { p.facing = spin_->facing; spin_.reset(); }
+        else p.facing = faces[(spinClock_++ >> 3) & 3];
+        return;
+    }
     if (!glides_.empty()) {                                // 00:18F5: one pixel a frame
         Glide& g = glides_.front();
         for (int k = 0; k < 2; k++) {
@@ -501,6 +508,12 @@ void Field::runEventCommand(int cmd, int param) {
             glides_.push_back({0x60, {4, 5}, {Dir::Left, Dir::Left}});
             glides_.push_back({0x10, {4, 5}, {Dir::Up, Dir::Left}});
             glides_.push_back({0x40, {4, 5}, {Dir::Up, Dir::Up}});
+            return;
+        case 0x08: case 0x09:                                          // 190D / 1950
+            if (playSfx) playSfx(param == 0x08 ? 0x3f : 0x1f);
+            spin_ = Spin{0, param == 0x08, p.facing};
+            lastEvent_ = param == 0x08 ? "spin and fling (event 12 08)" : "spin (event 12 09)";
+            p.facing = Dir::Up;
             return;
         case 0x0b: runEventCommand(0x0e, 0x37); return;                // 1711
         case 0x0c: runEventCommand(0x0d, 0x02); return;                // 1728

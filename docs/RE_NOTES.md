@@ -348,3 +348,18 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   pulled 1/4 of the way to (OAM 40, 84) each step; 6 = SCX per line from a 64-entry +-table
   (44B0) rotated each frame, 64 frames, then 96 more doubling the wrapped value; A = particles
   plus two SCX writes a line (table 488E) and every third frame SCY $40 above line 64.
+
+## Rare field events (00:14CA / 00:16BF sub-command tables)
+- Swept every text ref (codes $39/$3A/$3C/$3E in banks 3/9/A), object table and block attribute:
+  of the untranslated subs only $12 $08 / $09 are reachable, from text 0A:7A7D (event $2A,
+  block $3F attr $EA at map 01 33,8, the centre of the desert spiral). Flag $AD set -> text
+  0A:5EAC; else flag $09 set -> $12 $09, else $12 $08. Then "Whoa, sandstorm!" (0A:6C4F).
+  $10 $51 sits at 0A:4000 but nothing references it. The rest are dead.
+- The spiral centre has object id $27 kind 3 (flag $AE, move type 6 = 01:4FC8 ret, never moves).
+  On an event block it gets wC2E0 = $47 (01:4EDD), so the leader's object check 01:465F blocks:
+  the tile is only reachable while flag $AE hides it.
+- $12 $08 (00:190D): sfx $3F, 160 frames of: spin (01:53FF, frame table 01:5292[(hFF93>>3)&3]
+  by wC320 -> up/right/down/left), wC210 (leader screen Y) -= 2 for 80 frames then += 2,
+  redraw (00:18F5). OAM Y wraps, so the leader reappears at the bottom. Text waits.
+  $12 $09 (00:1950): sfx $1F, the spin only. Emulator-checked by pointing event $23 (the
+  cockpit console) at 00:1BD7 in a patched ROM copy.

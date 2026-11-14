@@ -165,10 +165,8 @@ loads, then fades in, about a second in all, like the real game. Holding a direc
 straight through a hatch takes you back again, also like the real game.
 
 ## Known not done yet
-Each of these shows a "Not done yet" notice when it comes up:
-- Event $10 $5 / $8 / $A / $C / $F
-- Event $12 $07-$09 / $0D-$0F / $11
-
-These cover vehicle changes, a member transforming, and the ending.
+Nothing reachable. The game has a few leftover event codes ($10 $5/$8/$A/$C/$F, $12 $07 /
+$0D-$0F / $11) that no text, object or tile ever fires; if one ever shows a "Not done yet"
+notice, that's a bug worth reporting.
 
 The last few steps of the prologue walk on the Talon are placed rather than walked.
