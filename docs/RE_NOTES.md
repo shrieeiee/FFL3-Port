@@ -421,3 +421,6 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
 - Step events by vehicle (00:0906): 0 and 2 all of them, 1 (afloat) none, 3+ only attr $EA.
 - B by vehicle (00:0861): 1 -> 01:4311 off the float: story flag 4 set, and cleared + vehicle 0
   if the block underneath is attr 0-2 or $88-$8B (42E2); 2 -> 4272 (ashore ahead); 3+ -> 4250.
+- A jump settles the leader's layer flags on each block it passes, like a step (4E48; RAM: $45
+  after landing on a $12 walkway). The port kept the take-off flags, so it could jump off a
+  walkway onto plain ground where the real game stays put (map 22, 5,34).

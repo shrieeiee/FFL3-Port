@@ -130,7 +130,8 @@ while q:
     y, x, f, face = cur_st
     if (y, x) != (sr, sc) and is_goal(y, x): end = (y, x, f, face); break
     plain_exit = (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) in (0, 1) and warp(y, x) is None
-    if (y, x) != (sr, sc) and (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) != 0x25 and not plain_exit:
+    passover = (A[y][x] & 0x3f) in (0x20, 0x21, 0x2d, 0x2e, 0x30, 0x31)   # damage / cure floors, no-ops
+    if (y, x) != (sr, sc) and (A[y][x] & 0xc0) == 0xc0 and (A[y][x] & 0x3f) != 0x25 and not plain_exit and not passover:
         w = warp(y, x)                                    # same-map warp: carry on from where it lands
         if w and w[0] == m:
             push((w[1] % H, w[2] % W, 0x47, ''), cur_st, '|', c0 + 1)
@@ -139,10 +140,17 @@ while q:
         ny, nx = (y + dy) % H, (x + dx) % W
         ok, g = step(f, A[ny][nx])
         if not ok or (ny, nx) in objs: continue
-        push((ny, nx, g, d), cur_st, d, c0 + 1)
+        push((ny, nx, g, d), cur_st, d, c0 + (6 if A[ny][nx] in (0xe0,) else 1))   # $20 hurts: avoid it
     if face:                                              # B: jump the way we face (01:47B2); costs more
         j = jump(y, x, f, face)
-        if j: push((j[0], j[1], f, face), cur_st, 'J', c0 + 4)
+        if j:                                             # the flags settle on each block passed (4E48)
+            dy, dx = {'U': (-1, 0), 'D': (1, 0), 'L': (0, -1), 'R': (0, 1)}[face]
+            g, yy, xx = f, y, x
+            while (yy, xx) != j:
+                yy, xx = (yy + dy) % H, (xx + dx) % W
+                a = A[yy][xx]
+                g = 0x47 if (a & 0xc0) in (0xc0, 0x80) else layer(g, a)
+            push((j[0], j[1], g, face), cur_st, 'J', c0 + 4)
 if not end:
     print('no path', file=sys.stderr); sys.exit(1)
 path = []

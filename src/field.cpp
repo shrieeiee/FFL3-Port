@@ -378,6 +378,7 @@ void Field::tick(int dir) {
             p.dr = kDr[int(j.d)]; p.dc = kDc[int(j.d)];
             p.row = wrap(p.row + p.dr, rows()); p.col = wrap(p.col + p.dc, cols());
             p.speed = 1; p.moveFrames = 16; p.scripted = false;
+            settleLeaderFlags();                                      // 4E48: as for a step (RAM: $45 on a $12 walkway)
         }
         if (++j.frame >= 32 && p.moveFrames == 0) {
             const bool moved = j.moves;

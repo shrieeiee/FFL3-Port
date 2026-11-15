@@ -62,12 +62,22 @@ peek spell_list
 keys A w120
 peek floating                         # vehicle 1: 8 px up, bobbing, a shadow
 
-== over the mountains to the cave (afloat: no step events, 00:0906)
+== over the mountains to the town (map 20) (afloat: no step events, 00:0906)
 go L1 U1 L4 D14 L2 D7 L12 U5 L1
-check over_the_cave
+check over_the_town
 go D1
 settle
 keys B w30                            # B: off the float on plain ground (01:4311)
 check landed
 go U1
-check cave                            # map 20
+check town                            # map 20: canals and an inn
+
+== through the inn (map 23) and its upper floor (map 22)
+go D9 R2 D2 R1 D2 R1 D3 R4 U1
+check inn_23
+go U6 L2 D2
+check floor_22
+go D2 L2 U7 L5
+jump
+go D4 L9                              # over the cure floor ($E1)
+check canal_walkway    # back in map 20, up on the walkway (flags $45)
