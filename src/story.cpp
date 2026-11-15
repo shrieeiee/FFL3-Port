@@ -86,7 +86,16 @@ AnimTask StoryPlayer::run() {
             for (size_t i = 1; i < s.w.size(); i++) section += (i > 1 ? "_" : "") + s.w[i];
             continue;
         }
-        if (op == "new") {
+        if (op == "new") {                                             // the presses of run/probe.txt:
+            for (int f = 0; f < 600; f++) co_await tick();              // title, story crawl, four names
+            co_await press(Start, 1); for (int f = 0; f < 60; f++) co_await tick();
+            co_await press(A, 1); for (int f = 0; f < 60; f++) co_await tick();
+            co_await press(A, 400);
+            for (int m = 0; m < 4; m++) {
+                co_await press(Start, 1); for (int f = 0; f < 60; f++) co_await tick();
+                co_await press(A, 10);
+            }
+            co_await press(Start, 1); for (int f = 0; f < 60; f++) co_await tick();
             co_await mashUntilFree(60000, true, &ok);
             if (!ok) { fail(at + " never got control"); co_return; }
         } else if (op == "go") {                                       // go D3 L2: end up 3 blocks down, ...

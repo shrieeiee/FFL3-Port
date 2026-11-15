@@ -419,6 +419,7 @@ int main(int argc, char** argv) {
                 return ok;
             });
         menu->playSfx = [&](int id) { sndSfx(id); };
+        menu->canCast = [&](uint8_t id) { return field.canCast(id); };
     };
     auto chest = [&](int slot, const MapObject& o) {           // 00:09D7
         const int k = o.id - 1;
@@ -787,7 +788,7 @@ int main(int argc, char** argv) {
                 MenuInput in;
                 in.a = c == 'A'; in.b = c == 'B'; in.up = c == 'U'; in.down = c == 'D';
                 menu->tick(in);
-                if (menu->done()) menu.reset();
+                if (menu->done()) { if (menu->fieldSpell()) { sndSfx(0x1f); field.cast(menu->fieldSpell()); } menu.reset(); }
                 continue;
             }
             if (shop) {                                 // A / B / U / D drive an open shop
@@ -1526,7 +1527,11 @@ int main(int argc, char** argv) {
                 if (sk & StoryPlayer::Right) synth[SDL_SCANCODE_RIGHT] = 1;
                 if (sk & StoryPlayer::A) synth[SDL_SCANCODE_Z] = 1;
                 if (sk & StoryPlayer::B) synth[SDL_SCANCODE_X] = 1;
-                if (sk & StoryPlayer::Start) synth[SDL_SCANCODE_RETURN] = 1;
+                static bool storyStartPrev = false;              // Start: Enter on the title / naming; on the
+                const bool st = sk & StoryPlayer::Start;         // field it opens the menu (a key-down, like M)
+                if (st && (opening || prologue)) synth[SDL_SCANCODE_RETURN] = 1;
+                else if (st && !storyStartPrev && !battle && !shop && !menu && !console && !text.active()) openMenu();
+                storyStartPrev = st;
                 k = synth;
                 if (story.finished()) { writeGrid((std::filesystem::path(storyDir) / "grid.txt").string()); running = false; }
             }
@@ -1572,7 +1577,7 @@ int main(int argc, char** argv) {
                 in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;
                 in.left = left && !leftPrev; in.right = right && !rightPrev;
                 menu->tick(in);
-                if (menu->done()) menu.reset();
+                if (menu->done()) { if (menu->fieldSpell()) { sndSfx(0x1f); field.cast(menu->fieldSpell()); } menu.reset(); }
             } else if (shop) {
                 ShopInput in;
                 in.a = aPressed; in.b = bHeld && !bPrev; in.up = up && !upPrev; in.down = down && !downPrev;

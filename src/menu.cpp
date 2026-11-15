@@ -91,6 +91,27 @@ std::vector<FieldMenu::Spell> FieldMenu::spells(int member) {
     return v;
 }
 
+// 09:4C4F: teach member m the spell in the bag (record +$51..$56, spell id = bit id & 7 of byte
+// (id >> 3) ^ 1). Already known: "You have that!" (6F8B); 24 known: "That's too many!" (6F9C);
+// else the bag loses one and "Learned <it>." (6FDD).
+void FieldMenu::learn(int m) {
+    CharRecord& r = party_[size_t(m)];
+    const size_t byte = size_t(0x51 + ((learnId_ >> 3) ^ 1));
+    const uint8_t mask = uint8_t(1 << (learnId_ & 7));
+    if (r.raw[byte] & mask) { say("  You have that!", "", State::Items); overParty_ = true; return; }
+    int known = 0;
+    for (int k = 0; k < 6; k++) for (int b = 0; b < 8; b++) known += (r.raw[size_t(0x51 + k)] >> b) & 1;
+    if (known >= 0x18) { say(" That's too many!", "", State::Items); overParty_ = true; return; }
+    r.raw[byte] |= mask;
+    const size_t h = size_t(0xc6ff + learnSlot_ * 2);
+    if (--ram_[h + 1] == 0) { ram_[h] = 0xff; ram_[h + 1] = 0xff; }
+    say("", "", State::Items);
+    overParty_ = true;
+    messageG_ = asciiGlyphs("  Learned ");
+    for (uint8_t g : itemName(rom_, learnId_)) messageG_.push_back(g);
+    messageG_.push_back(asciiGlyphs(".")[0]);
+}
+
 void FieldMenu::choose(uint8_t id, bool spell) {
     BattleVM& m = vm();
     m.mem[0xce26] = id; m.mem[0xce25] = 0; m.mem[0xce27] = spell ? 0 : 1; m.mem[0xcd37] = 0;
@@ -98,6 +119,17 @@ void FieldMenu::choose(uint8_t id, bool spell) {
     runLogicNative(m, rom_, 0x6b64);                         // 09:5D87: use kind wCE28
     const uint8_t kind = m.mem[0xce28];
     useId_ = id; useSpell_ = spell; back_ = spell ? State::Spells : State::Items;
+    static const uint8_t fieldSpells[] = {0x21, 0x20, 0x25, 0x1b, 0x2c};   // 09:4DA2
+    if (spell && std::find(std::begin(fieldSpells), std::end(fieldSpells), id) != std::end(fieldSpells)) {
+        if (!canCast || !canCast(id)) { sfx(0x3b); say("Can't use that here.", "", back_); return; }   // 4DCE
+        CharRecord& r = party_[size_t(member_)];
+        if (r.mp() < m.mem[0xce29]) { sfx(0x3b); say("Not enough MP.", "", back_); return; }           // 4A2C
+        const int mp = r.mp() - m.mem[0xce29];                                                           // 4D9A
+        r.raw[0x14] = uint8_t(mp); r.raw[0x15] = uint8_t(mp >> 8);
+        fieldSpell_ = id;
+        state_ = State::Done;                                                                            // 4DBF: out of the menu
+        return;
+    }
     if (spell && party_[size_t(member_)].mp() < m.mem[0xce29]) { sfx(0x3b); say("Not enough MP.", "", back_); return; }
     if (!kind || (kind & 0x80) || !(kind & 0x18)) { sfx(0x3b); say("Can't use that here.", "", back_); return; }
     if (kind & 0x10) { use(0x80); return; }
@@ -183,6 +215,10 @@ void FieldMenu::tick(const MenuInput& in) {
         }
         mark_ = -1;                                            // A on the same one: use it
         member_ = 0;
+        if (const uint8_t id = ram_[size_t(0xc6ff + bag[size_t(bag_)] * 2)]; id < 0x30) {   // a spell: learn it
+            learnId_ = id; learnSlot_ = bag[size_t(bag_)]; target_ = 0; state_ = State::Learn;
+            return;
+        }
         choose(ram_[size_t(0xc6ff + bag[size_t(bag_)] * 2)], false);
         return;
     }
@@ -191,14 +227,22 @@ void FieldMenu::tick(const MenuInput& in) {
         const int n = std::max<int>(1, int(list.size()));
         step(bag_, n);
         first_ = std::max(0, std::min(bag_ - 7, n - 8));
-        if (in.b) { state_ = State::Member; return; }
-        if (in.a && !list.empty()) choose(list[size_t(bag_)].id, true);
+        if (in.b) { if (mark_ >= 0) mark_ = -1; else state_ = State::Member; return; }
+        if (!in.a || list.empty()) return;
+        if (mark_ != bag_) { mark_ = bag_; return; }           // first A marks (another one: the mark moves; unverified)
+        mark_ = -1;
+        choose(list[size_t(bag_)].id, true);
         return;
     }
     case State::Target:
         step(target_, n4);
         if (in.b) { state_ = back_; return; }
         if (in.a) use(target_);
+        return;
+    case State::Learn:                                         // 4C57: the four members, not the guest
+        step(target_, std::min(n4, 4));
+        if (in.b) { state_ = State::Items; return; }
+        if (in.a) learn(target_);
         return;
     case State::Talents: case State::Status:
         if (in.a || in.b) state_ = State::Member;
@@ -230,7 +274,7 @@ int FieldMenu::cursorRow() const {
     switch (state_) {
     case State::Top: return 2 + top_ * 2;
     case State::Member: return member_ < 4 ? 2 + member_ * 3 : 15;
-    case State::Target: return target_ < 4 ? 2 + target_ * 3 : 15;
+    case State::Target: case State::Learn: return target_ < 4 ? 2 + target_ * 3 : 15;
     case State::Auto: return member_ < 4 ? 2 + member_ * 3 : 15;
     case State::Slots: return 10 + (slot_ / 2) * 2;
     case State::Bag: return 10 + (bag_ - first_) * 2;
@@ -297,8 +341,7 @@ void FieldMenu::drawList(UiScreen& s) const {
     if (state_ == State::Spells) {
         const auto sp = const_cast<FieldMenu*>(this)->spells(member_);
         for (int i = 0; i < 8 && first_ + i < int(sp.size()); i++) {
-            uiPut(s, 4, 2 + i * 2, itemName(rom_, sp[size_t(first_ + i)].id));
-            uiNum(s, 13, 2 + i * 2, sp[size_t(first_ + i)].cost);
+            uiPut(s, 4, 2 + i * 2, itemName(rom_, sp[size_t(first_ + i)].id));   // no cost shown
         }
         return;
     }
@@ -307,7 +350,6 @@ void FieldMenu::drawList(UiScreen& s) const {
         const size_t h = size_t(0xc6ff + bag[size_t(first_ + i)] * 2);
         uiPut(s, 4, 2 + i * 2, itemName(rom_, ram_[h]));
         uiNum(s, 13, 2 + i * 2, ram_[h + 1]);
-        if (mark_ == first_ + i) s[size_t((2 + i * 2) * 20 + 2)] = 0xf5;
     }
 }
 
@@ -425,6 +467,24 @@ std::vector<UiSprite> FieldMenu::sprites() const {
     case State::Top: case State::Member: case State::Target: party(0); break;
     case State::Auto: party(1); break;
     case State::Status: case State::Slots: case State::Bag: v.push_back(memberSprite(rom_, party_[size_t(member_)], 8, 8)); break;
+    case State::Items: case State::Spells: {
+        auto tiles = [&](uint16_t a, UiSprite& sp, std::initializer_list<int> which) {
+            int k = 0;
+            for (int w : which) { if (w >= 0) decodeTile(rom_.raw(3, uint16_t(a + w * 16)), sp.tiles[size_t(k)]); k++; }
+        };
+        UiSprite sack{136, 64, {}};                                // 03:5700 the bag / 03:5740 the spell book
+        tiles(state_ == State::Items ? 0x5700 : 0x5740, sack, {0, 1, 2, 3});
+        v.push_back(sack);
+        UiSprite arrows{0, 64, {}};                                // 03:57A0: two arrows on the left edge
+        tiles(0x57a0, arrows, {0, 0, -1, -1});
+        v.push_back(arrows);
+        if (mark_ >= first_ && mark_ < first_ + 8) {               // the marked line: a second hand, 4 px down
+            UiSprite hand{16, (2 + (mark_ - first_) * 2) * 8 + 4, {}};
+            tiles(0x5430, hand, {0, -1, -1, -1});
+            v.push_back(hand);
+        }
+        break;
+    }
     case State::Save:
         for (int f = 0; f < 3; f++) { CharRecord r; if (peek_ && peek_(f, r)) v.push_back(memberSprite(rom_, r, 16, 56 + f * 32)); }
         break;
@@ -437,7 +497,7 @@ UiScreen FieldMenu::screen() const {
     UiScreen s{};
     switch (state_) {
     case State::Top: drawMain(s); break;
-    case State::Member: case State::Target: drawParty(s, 0, 0); break;
+    case State::Member: case State::Target: case State::Learn: drawParty(s, 0, 0); break;
     case State::Auto:
         uiBox(s, 1, 1, 18, 2);
         putStr(s, 4, 2, "Auto Battle");
@@ -449,9 +509,16 @@ UiScreen FieldMenu::screen() const {
     case State::Talents: drawTalents(s); break;
     case State::Save: drawSave(s); break;
     case State::Message:
+        if (overParty_) {                                  // 09:4CAE: a box over the party list
+            drawParty(s, 0, 0);
+            uiBox(s, 0, 6, 20, 3);
+            if (!messageG_.empty()) uiPut(s, 1, 7, messageG_); else putStr(s, 1, 7, message_.c_str());
+            break;
+        }
         uiBox(s, 1, 1, 18, 16);
         uiBox(s, 1, 6, 18, 6);
-        putStr(s, 1, 7, message_.c_str());
+        if (!messageG_.empty()) uiPut(s, 1, 7, messageG_);
+        else putStr(s, 1, 7, message_.c_str());
         putStr(s, 1, 9, message2_.c_str());
         break;
     case State::Done: break;

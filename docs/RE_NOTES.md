@@ -403,3 +403,21 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   step event (wCA56 = 1). It's how the North Tower's pitfalls are crossed.
 - Pitfall ($08/$09, 00:14B2 -> 01:661C): sound $3F, the leader drops a block and the scroll goes
   back up 16 px, then the exit table by the pitfall's own region.
+- Learning a spell from the bag (Item, 09:4C4F): pick one of the four members (not the guest);
+  spell bit `1 << (id & 7)` in record +$51 + ((id >> 3) ^ 1). "You have that!" (6F8B), "That's
+  too many!" (6F9C, 24 known), else "Learned X." (6FDD) in a box over the party list, and the
+  bag count drops by one.
+- Item and Magic lists: one 20x18 box, names at column 4, item counts at 13, spells without a
+  cost. Sprites: a sack at (136, 64) (03:5700 items, 03:5740 spells), two arrows ▼ at (0, 64)
+  (03:57A0), and the first A marks a line with a second hand 4 px below the cursor (03:5430).
+  A again on the marked line uses it.
+- Field spells, 09:4D79: list 09:4DA2 = $21 Float, $20, $25, $1B, $2C; each has a place check
+  (01:40D6 Float, 4132, 424D, 422E) -> "Can't use that here" (7301); then the MP check (4A2C)
+  and charge (4D9A); the menu closes (4DBF) and the field loop runs 01:402D on wCA16.
+- Float, 01:40D6: on foot and on maps 2-5 only. 4049: sfx $1F, 4063 brings a float (tiles
+  $24-$27) down onto the leader, 2 px a frame for $24 frames; vehicle 1 (mask $BC, follower
+  dropped by 1586). Drawn 8 px up, $20 / $24 swapped every 16 frames (the $24 one a pixel
+  lower), shadow $7F on the leader's own spot (left half mirrored).
+- Step events by vehicle (00:0906): 0 and 2 all of them, 1 (afloat) none, 3+ only attr $EA.
+- B by vehicle (00:0861): 1 -> 01:4311 off the float: story flag 4 set, and cleared + vehicle 0
+  if the block underneath is attr 0-2 or $88-$8B (42E2); 2 -> 4272 (ashore ahead); 3+ -> 4250.

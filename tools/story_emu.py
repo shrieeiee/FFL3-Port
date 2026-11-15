@@ -181,3 +181,5 @@ for ln, line in enumerate(steps, 1):
     else:
         fail(f'line {ln} unknown step {op}')
 emit('DONE', 'end')
+if os.environ.get('STORY_STATE'):                         # debug: keep where the route ended
+    with open(os.environ['STORY_STATE'], 'wb') as f: pb.save_state(f)

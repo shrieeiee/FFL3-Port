@@ -54,8 +54,21 @@ static void drawSprite(const TileCache& tc, uint8_t obp, Frame& out, int sx, int
     }
 }
 
+static void drawTile8(const TileCache& tc, uint8_t obp, Frame& out, int sx, int sy, int tile, bool flipX) {
+    const auto& t = tc.obj[tile & 0x7f];
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++) {
+            const uint8_t c = t[y * 8 + (flipX ? 7 - x : x)];
+            if (!c) continue;
+            const int X = sx + x, Y = sy + y;
+            if (X < 0 || Y < 0 || X >= out.w || Y >= out.h) continue;
+            out.px[size_t(Y) * out.w + X] = uint8_t((obp >> (c * 2)) & 3);
+        }
+}
+
 static void frameFor(const Actor& m, int baseTile, int& tile, bool& flip) {
     tile = baseTile; flip = false;
+    if (m.obj.kind == 1) return;                       // chests: movement type $0A's frames (01:6C4A) are tiles 0-3 whatever the facing
     const bool step = m.moveFrames > 0 && ((m.animTick >> 3) & 1);
     switch (m.facing) {
     case Dir::Down:  tile = baseTile + 0; flip = step; break;
@@ -145,8 +158,17 @@ void renderField(const Field& f, const TileCache& tc, const RenderOpts& o, Frame
         const int top = out.h / 2 - 72;               // where the GB screen's row 0 sits
         sy = (((sy - lift - top + 16) & 255) - 16) + top;
     }
+    if (f.vehicle() == 1) {                           // Float: 8 px up, bobbing $20 / $24 every 16 frames,
+        const bool bob = (f.clock() >> 4) & 1;         // a shadow ($7F, the left half mirrored) on its spot
+        drawSprite(tc, o.obp, out, sx, sy - 8 + bob, bob ? 0x24 : 0x20, false);
+        drawTile8(tc, o.obp, out, sx, sy + 8, 0x7f, true);
+        drawTile8(tc, o.obp, out, sx + 8, sy + 8, 0x7f, false);
+        return;
+    }
     frameFor(p, p.spriteTile, tile, flip);
     drawSprite(tc, o.obp, out, sx, sy, tile, flip);
+    if (const int d = f.floatDrop())                  // 01:4063: the float comes down, 2 px a frame
+        drawSprite(tc, o.obp, out, sx, sy - 8 - 2 * d, 0x24, false);
 }
 
 static void drawBgTile(const TileCache& tc, uint8_t bgp, Frame& out, int sx, int sy, uint8_t tile) {

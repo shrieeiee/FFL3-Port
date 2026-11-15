@@ -24,9 +24,13 @@ public:
     int cursorCol() const;
     std::vector<UiSprite> sprites() const;
     std::function<void(int id)> playSfx;
+    // 09:4D79: spells that act on the field ($21 Float, $20, $25, $1B, $2C). canCast(id) is the
+    // place check (01:40D6 ...); once cast the menu closes and fieldSpell() says which to run.
+    std::function<bool(uint8_t id)> canCast;
+    uint8_t fieldSpell() const { return fieldSpell_; }
 
 private:
-    enum class State { Top, Member, Slots, Bag, Items, Spells, Target, Talents, Status, Auto, Save, Message, Done };
+    enum class State { Top, Member, Slots, Bag, Items, Spells, Target, Learn, Talents, Status, Auto, Save, Message, Done };
     struct Spell { uint8_t id, cost; };
     std::vector<int> bagIndices() const;
     void equip(int slot, int bagIndex);
@@ -36,7 +40,13 @@ private:
     std::vector<Spell> spells(int member);
     void choose(uint8_t id, bool spell);    // check the use kind, then pick a target or use
     void use(int target);                   // 0-4, or $80 = everyone
-    void say(const std::string& l1, const std::string& l2, State next) { message_ = l1; message2_ = l2; next_ = next; state_ = State::Message; }
+    void say(const std::string& l1, const std::string& l2, State next) { message_ = l1; message2_ = l2; messageG_.clear(); overParty_ = false; next_ = next; state_ = State::Message; }
+    void learn(int member);                    // 09:4C4F: a spell from the bag
+    uint8_t fieldSpell_ = 0;
+    uint8_t learnId_ = 0;
+    int learnSlot_ = -1;                       // its bag slot
+    Glyphs messageG_;                          // a message in game glyphs (an item name in it)
+    bool overParty_ = false;                   // the learn messages sit in a box over the party list
     void sfx(int id) { if (playSfx) playSfx(id); }
     int members() const;                    // 4, or 5 with a guest
     void drawMain(UiScreen& s) const;

@@ -189,7 +189,7 @@ bool Field::tryJump() {
 }
 
 bool Field::busy() const {
-    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_ || floatDrop_) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -227,7 +227,18 @@ void Field::setVehicle(int mode) {
     static const uint8_t tile[9] = {0x00, 0x20, 0x28, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10};
     p.spriteTile = (mode >= 0 && mode < 9) ? tile[mode] : 0;
     Actor& f = actors_[1];
-    if (f.used) f.id = mode >= 3 ? 0 : f.savedId;              // the follower boards too
+    if (f.used) f.id = (mode >= 3 || mode == 1) ? 0 : f.savedId;   // the follower boards too (Float: 1586 drops it)
+}
+
+bool Field::canCast(uint8_t id) const {
+    switch (id) {
+    case 0x21: return vehicle_ == 0 && map_ >= 2 && map_ <= 5;   // 40D6: 0008, then 418A
+    default: return false;                                        // $20 $25 $1B $2C: not yet
+    }
+}
+
+void Field::cast(uint8_t id) {
+    if (id == 0x21) floatDrop_ = 36;                              // 4049 -> 4063 (40C2: $24 frames)
 }
 
 void Field::takeOff(int mode) {
@@ -250,6 +261,16 @@ bool Field::boardTalon() {
 }
 
 bool Field::land() {
+    if (vehicle_ == 1) {                                         // 00:0861 -> 01:4311: off the float
+        if (actors_[0].moveFrames || busy()) return false;
+        const uint8_t a = attrAt(actors_[0].row, actors_[0].col);
+        flags_.event.set(0x04);                                  // 42E2: flag 4 set ...
+        if (!(a <= 2 || (a & 0xfc) == 0x88)) return true;        // ... and kept where it can't land
+        flags_.event.reset(0x04);
+        setVehicle(0);                                           // 4307
+        lastEvent_ = "off the float";
+        return true;
+    }
     if (vehicle_ < 2 || actors_[0].moveFrames) return false;    // 00:0861: modes 2-8 -> 01:4250
     const Actor& p = actors_[0];
     saved_ = {map_, p.row, p.col};                             // 4250: wC6E4 -> wC6E9
@@ -340,7 +361,12 @@ void Field::wanderStep() {
 }
 
 void Field::tick(int dir) {
+    clock_++;
     if (trans_) { trans_--; return; }                    // fading: nothing moves
+    if (floatDrop_ && --floatDrop_ == 0) {                // 4053: then vehicle 1, the party floats
+        setVehicle(1);
+        lastEvent_ = "float";
+    }
     for (Actor& a : actors_) a.animTick++;
     if (flash_) flash_--;
     if (jump_) {                                                      // 01:4811.. / 4965: 1 px a frame
@@ -452,7 +478,10 @@ void Field::onStepDone() {
     Actor& p = actors_[0];
     layer_ = blockAt(p.row, p.col) & 0x40;
     const uint8_t a = attrAt(p.row, p.col);     // 00:091b
-    if ((a & 0xc0) == 0xc0) { runEventCommand(a & 0x3f, 0); return; }
+    // 00:0906: on foot or in the ship (0 / 2) every event block; afloat (1) none; the Talon (3+)
+    // only $EA (setting down).
+    const bool events = vehicle_ == 0 || vehicle_ == 2 || (vehicle_ >= 3 && a == 0xea);
+    if (events && (a & 0xc0) == 0xc0) { runEventCommand(a & 0x3f, 0); return; }
     // 01:4617: after each step, a battle with chance 00:119A[header byte 4 >> 5] / 256.
     const int rate = encounterRate(rom_, hdr_.music_hi);
     if (encounters && rate && random8() < rate && startBattle)
@@ -702,10 +731,10 @@ void Field::runEventCommand(int cmd, int param) {
     }
 }
 
-void Field::openChest(int slot) {             // 00:0A08: the object's sprite becomes $78
+void Field::openChest(int slot) {             // 00:0A00: wC280 (tile base) and wC330 become $78
     Actor& a = actors_[size_t(slot)];
-    a.obj.sprite = 0x78;
-    a.spriteTile = a.obj.spriteTile();
+    a.obj.sprite = 0x78;                       // wC330
+    a.spriteTile = 0x78;                       // wC280: straight in (not through the sprite id)
 }
 
 } // namespace ffl3

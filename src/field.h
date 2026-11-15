@@ -95,6 +95,10 @@ public:
     Spot savedSpot() const { return {saved_.map, saved_.row, saved_.col}; }
     void setSavedSpot(Spot s) { saved_ = {s.map, s.row, s.col}; }
     void takeOff(int mode);            // 01:63E6
+    // 01:402D field spells. canCast is the place check (Float 01:40D6: on foot, maps 2-5);
+    // cast runs it (Float 01:4049: vehicle 1, the party floats).
+    bool canCast(uint8_t id) const;
+    void cast(uint8_t id);
     bool land();                       // B in the Talon: 01:4250 -> into the Talon (map $10)
     bool boardTalon();                 // A on its parking spot: 01:631A
     void setVehicle(int mode);         // wC6E3 + 00:08AD: leader sprite / animation for the mode
@@ -148,6 +152,8 @@ private:
     // arc (wCA13 counting down, height 01:4A3F), 1 px a frame; the landing gets its step event.
     struct Jump { int frame = 0; int blocks = 0; Dir d = Dir::Down; bool moves = false; };
     std::optional<Jump> jump_;
+    int floatDrop_ = 0;                // 01:4063: Float coming down onto the leader, 36 frames
+    unsigned clock_ = 0;               // frames, for the float's bob
     int jumpHeight_[32] = {};
     bool jumpWall(int r, int c) const;     // 01:4B5E
     bool jumpLand(int r, int c) const;     // 01:4BA7
@@ -168,6 +174,8 @@ public:
     static constexpr int kTransition = 60;
     // $27/$28 moves swap the LCD handlers for the walk (00:1B2D ... 1B50): no text window.
     bool scriptWalking() const { return !walks_.empty(); }
+    int floatDrop() const { return floatDrop_; }
+    unsigned clock() const { return clock_; }
     int leaderLift() const {           // screen pixels the leader is drawn above its spot
         if (jump_) return jumpHeight_[(31 - jump_->frame) & 31];
         if (!spin_ || !spin_->fling) return 0;
