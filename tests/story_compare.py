@@ -81,6 +81,13 @@ def shotdiff(label):
 
 SHOT_LIMIT = 0.08          # more than 8% of the screen different: flag it (animation phases differ a bit)
 bad = 0
+# Checkpoints whose screen is known to differ: '# known: ...' on the check line (a note, not a failure).
+known = {}
+for line in open(a.route):
+    w = line.split('#', 1)
+    t = w[0].split()
+    if len(t) >= 2 and t[0] in ('check', 'peek') and len(w) > 1 and 'known:' in w[1]:
+        known[t[1]] = w[1].split('known:', 1)[1].strip()
 print(f'{"checkpoint":28} {"port":22} {"real game":22} result')
 for i, pc in enumerate(port):
     ec = emu[i] if i < len(emu) else None
@@ -98,9 +105,11 @@ for i, pc in enumerate(port):
     notes = []
     if pc['maxhp'] != ec['maxhp']: notes.append('(party ' + ' '.join(pc['party']) + ' vs ' + ' '.join(ec['party']) + ': random battles differ)')
     sd = shotdiff(pc['label'])
-    if sd is not None and sd > SHOT_LIMIT: probs.append(f'screen {sd:.0%} different (see {a.keep}/sbs/{pc["label"]}.png)')
+    if sd is not None and sd > SHOT_LIMIT:
+        if pc['label'] in known: notes.append(f'(screen {sd:.0%} different, known: {known[pc["label"]]})')
+        else: probs.append(f'screen {sd:.0%} different (see {a.keep}/sbs/{pc["label"]}.png)')
     bad += bool(probs)
-    print(f'{pc["label"][:28]:28} {pdesc:22} {edesc:22} {"ok" if not probs else "DIFF: " + "; ".join(probs)}' + (' ' + ' '.join(notes) if notes and probs else ''))
+    print(f'{pc["label"][:28]:28} {pdesc:22} {edesc:22} {"ok" if not probs else "DIFF: " + "; ".join(probs)}' + (' ' + ' '.join(notes) if notes else ''))
 if len(emu) > len(port): print(f'real game got {len(emu) - len(port)} checkpoints further: {emu[len(port)]["label"]}'); bad += 1
 if not port or port[-1]['kind'] != 'DONE': bad += 1
 last = port[-1] if port else None

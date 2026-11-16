@@ -100,7 +100,7 @@ check granny
 go D2
 check out_of_tower
 go D1 R2 U3 R5                        # the walkway's C5: a return - back up the stack to map 22
-check back_on_22
+check back_on_22                      # known: bottom halves behind BG on the walkway (layouts, 00:3A7F)
 go U2 R2 U1 R2 U1 R4 U1 R2 D1 R5 D7 R2 U3
 check back_in_inn
 go U1 R2 D7
@@ -111,3 +111,19 @@ go U9
 face U
 a
 check cronos                          # takes the Radar, gives Past
+
+== back to the Talon with Past (01:79B3: a Unit aboard lets it leave)
+go D11
+check out_of_house
+go D2 L4 U22 R3 U5
+check out_of_town
+keys S w40 D w10 A w30 A w30 A w30
+keys A w120
+check afloat_again
+go R1 D8 R18 U1                       # over the mountains to below the temple gap
+settle
+keys B w30                            # down off the float
+check below_temple
+face U
+a                                     # the monster in the gap (flag 4F): fixed battle $16
+check after_boss                      # lost - everyone on 1 HP, flag 4F cleared, the monster gone

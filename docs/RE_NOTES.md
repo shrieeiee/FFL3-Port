@@ -433,3 +433,9 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   bit 3 only blocks on the same layer as the leader (wC804).
 - NPC random walks (01:5060) roll 00:39D5: hFF90 += rrca((hFF93 + hFF90) ^ 1), hFF93 being the
   frame count - not something the port can match frame for frame.
+- The monster at the temple gap on the overworld (object $C8, shown while flag $4F is set) gives
+  fixed battle $16 when spoken to - a loss: everyone ends on 1 HP, flag $4F is cleared and it's gone.
+  You can talk to it while afloat. Movement types 4-10 (01:4F66 table) don't move at all.
+- TODO: ordinary sprites are drawn from per-frame layouts (00:3A7F) whose entries carry OAM flags;
+  on the map 22 walkway the leader's and NPCs' bottom halves come out with bit 7 (behind BG). The
+  port draws them in front (story run: back_on_22, ~9% of the screen).

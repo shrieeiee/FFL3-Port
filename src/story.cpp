@@ -54,7 +54,7 @@ AnimTask StoryPlayer::mashUntilFree(int limit, bool start, bool* ok) {
     for (int n = 0; !isFree(); n++) {
         if (n >= limit) { *ok = false; co_return; }
         uint8_t k = 0;
-        if (n % 16 < 2 && freeRun_ == 0) k = start && (n / 16) % 4 == 3 ? uint8_t(A | Start) : uint8_t(A);
+        if (n % 16 >= 8 && n % 16 < 10 && freeRun_ == 0) k = start && (n / 16) % 4 == 3 ? uint8_t(A | Start) : uint8_t(A);
         co_await tick(k);
     }
 }

@@ -53,6 +53,8 @@ npcs_still = [False]
 def _no_wander(_):                                        # 01:5092: just after the wander roll (00:39D5)
     if npcs_still[0]: mem[0xff90] |= 0x04                 # & $FC != 0: no step this time
 pb.hook_register(1, 0x5092, _no_wander, None)
+WATCH = {int(x, 16): -1 for x in os.environ.get('STORY_WATCH', '').split(',') if x}
+
 def tick(keys=()):
     """One frame with these buttons held; tracks how many frames in a row we've been free."""
     global frame, free_run
@@ -65,6 +67,12 @@ def tick(keys=()):
     pb.tick(1, bool(a.shots))
     frame += 1
     s = state()
+    if WATCH:                                             # debug: STORY_WATCH=c206,c769 logs changes
+        for ad in WATCH:
+            v = mem[ad]
+            if WATCH[ad] != v:
+                print(f'WATCH {ad:04x} {WATCH[ad]:02x} -> {v:02x} frame {frame} pos {s["row"]},{s["col"]}', flush=True)
+                WATCH[ad] = v
     free_run = free_run + 1 if (frame - st['ready'] <= 1 and s['aligned']) else 0
     return s
 
@@ -85,7 +93,7 @@ def mash_until_free(limit, start=False):
     while not free():
         if n >= limit: return False
         k = ()
-        if n % 16 < 2 and free_run == 0: k = ('a', 'start') if start and (n // 16) % 4 == 3 else ('a',)
+        if 8 <= n % 16 < 10 and free_run == 0: k = ('a', 'start') if start and (n // 16) % 4 == 3 else ('a',)
         tick(k); n += 1
     return True
 
