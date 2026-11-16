@@ -127,3 +127,11 @@ check below_temple
 face U
 a                                     # the monster in the gap (flag 4F): fixed battle $16
 check after_boss                      # lost - everyone on 1 HP, flag 4F cleared, the monster gone
+
+== up the temple to the Talon
+go U4
+check temple
+go U11
+check aboard
+go D22                                # down the deck (the lift: flashes, re-laid walkway) to the step text
+check bridge                          # map 10, the Talon's bridge

@@ -392,8 +392,10 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
   Holding its way = a notch faster (4D89), against = a notch slower (4D9C), sideways = an
   ordinary step if there's room. The Talon's walkway ($84/$88, patches 0B:79E0 4/5) and the
   desert spiral round the sandstorm ($88-$8B, flowing outwards) are conveyors.
-- The Talon lift (event $25, 00:1A95): every other use flashes 4x, sfx $3E and re-lays the
-  walkway (patch 5 going up, 4 going down), then one forced step.
+- The Talon lift (event $25, 00:1A95): wCA58 counts uses; the odd ones flash 4x (1AEA), sfx $3E
+  and re-lay the walkway (0B:7926, patch 5 facing up, 4 otherwise), then one forced step - up if
+  facing up (01:44A8), else down (441D), no wall check. (The port had only the step, so going
+  down the deck it bounced back up.)
 - Jump, 01:47B2 (on foot, map $0C on, B newly pressed; 00:07F8): sfx $39, the way the leader
   faces. 4A7F decides: can't (48FF: sfx $10, shake, a message) if wCA51, the block under has
   attr $3x, or the leader's flags & $8B = $09; on the spot (495E) if the block ahead is a wall

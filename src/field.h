@@ -145,6 +145,8 @@ private:
     struct Glide { int frames; int slot[2]; Dir dir[2]; };
     std::vector<Glide> glides_;
     int flash_ = 0;
+    unsigned liftUses_ = 0;            // wCA58
+    int liftStep_ = -1;                // the lift's step, waiting for the flashes
     // Events $12 $08/$09 (00:190D / 1950): the leader spins for 160 frames, facing from
     // 01:53FF (frame counter >> 3 & 3: up, right, down, left). $08 also flings them 2 px a frame
     // up the screen for 80 frames and back (wC210, the leader's screen Y; the camera stays put).
@@ -210,6 +212,7 @@ private:
     int holesFilled_ = 0;              // wCA01: boulders dropped this visit (event $2B)
     bool tryPush(int row, int col, Dir d);
     void applyMapPatches();
+    void applyPatch(int e);
     void boulderLanded(int slot);           // wC6E9-C6ED: saved position (event $10 4x/Dx/Ex)
     std::string lastEvent_;
     uint32_t rng_ = 0x5a6a3;

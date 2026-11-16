@@ -201,7 +201,7 @@ bool Field::tryJump() {
 }
 
 bool Field::busy() const {
-    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_ || floatDrop_) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_ || floatDrop_ || liftStep_ >= 0) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -301,18 +301,24 @@ void Field::applyMapPatches() {
         if (rom_.b(0x0b, uint16_t(0x7982 + e)) != map_) continue;
         const uint8_t f = rom_.b(0x0b, uint16_t(0x79b1 + e));
         if (f != 0xff && !flags_.test(f)) continue;
-        uint16_t p = rom_.w(0x0b, uint16_t(0x79e0 + e * 2));
-        const int col = rom_.b(0x0b, p++), row = rom_.b(0x0b, p++);
-        const uint8_t hdr = rom_.b(0x0b, p++);
-        if (!hdr) continue;
-        const int w = hdr >> 4, h = hdr & 15;
-        for (int r = 0; r < h; r++)
-            for (int c = 0; c < w; c++) {
-                const size_t at = size_t((row + r) * cols() + col + c);
-                const uint8_t v = rom_.b(0x0b, p++);
-                if (at < layout_.blocks.size()) layout_.blocks[at] = v;
-            }
+        applyPatch(e);
     }
+    blocksVersion_++;
+}
+
+// 0B:7926: one patch, 0B:79E0[e].
+void Field::applyPatch(int e) {
+    uint16_t p = rom_.w(0x0b, uint16_t(0x79e0 + e * 2));
+    const int col = rom_.b(0x0b, p++), row = rom_.b(0x0b, p++);
+    const uint8_t hdr = rom_.b(0x0b, p++);
+    if (!hdr) return;
+    const int w = hdr >> 4, h = hdr & 15;
+    for (int r = 0; r < h; r++)
+        for (int c = 0; c < w; c++) {
+            const size_t at = size_t((row + r) * cols() + col + c);
+            const uint8_t v = rom_.b(0x0b, p++);
+            if (at < layout_.blocks.size()) layout_.blocks[at] = v;
+        }
     blocksVersion_++;
 }
 
@@ -381,7 +387,10 @@ void Field::tick(int dir) {
         lastEvent_ = "float";
     }
     for (Actor& a : actors_) a.animTick++;
-    if (flash_) flash_--;
+    if (flash_ && --flash_ == 0 && liftStep_ >= 0) {                    // the lift's step, after its flashes
+        startMove(0, Dir(liftStep_), true, speedPx(leaderSpeed_));
+        liftStep_ = -1;
+    }
     if (jump_) {                                                      // 01:4811.. / 4965: 1 px a frame
         Jump& j = *jump_;
         Actor& p = actors_[0];
@@ -720,9 +729,18 @@ void Field::runEventCommand(int cmd, int param) {
         if (healParty) healParty();
         return;
     case 0x25: {                                                       // 1a95: Talon lift
-        // Carries the leader one more block the way they face (every other use also shakes).
-        const Dir d = p.facing;
-        if (passable(p.row + kDr[int(d)], p.col + kDc[int(d)])) startMove(0, d, true);
+        // wCA58 counts the uses. Every other one (the odd ones) flashes 4x with sfx $3E (1AEA) and
+        // re-lays the walkway, patch 0B:79E0 5 facing up, 4 otherwise (0B:7926). Then a forced
+        // step: up if facing up (01:44A8), else down (441D) - no wall check.
+        const Dir d = p.facing == Dir::Up ? Dir::Up : Dir::Down;
+        if (++liftUses_ & 1) {
+            if (playSfx) playSfx(0x3e);
+            flash_ = 32;
+            applyPatch(d == Dir::Up ? 5 : 4);
+            liftStep_ = int(d);                                        // after the flashes
+            return;
+        }
+        startMove(0, d, true, speedPx(leaderSpeed_));
         return;
     }
     case 0x3f:                                                         // $FF block by the Talon
