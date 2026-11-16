@@ -441,3 +441,15 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
 - TODO: ordinary sprites are drawn from per-frame layouts (00:3A7F) whose entries carry OAM flags;
   on the map 22 walkway the leader's and NPCs' bottom halves come out with bit 7 (behind BG). The
   port draws them in front (story run: back_on_22, ~9% of the screen).
+- Talon time warp. Eras (wCDC0, a bit each; name 9:72B3[lowest bit] x 11, text code $4D via
+  00:306C): 1 Present, 2 Past, 4 Future, 8 Pureland. The current one (0F:7BA7): flag 5 -> 8,
+  else $0E -> 1, else $0F -> 4, else 2. Cockpit Warp (01:7AE9): needs a unit (wC6F9 & $70), the
+  list E1 Past / E2 Future / E3; wCA50 = unit - $E1, out of the menu; 79E9 (b = wCA50 + 1): b 3 ->
+  Pureland; flag 5 -> no; flag $0E -> era ^ 3 (b 1) / ^ 5 (b 2); else b 1 needs $0F clear (era ^ 3),
+  b 2 needs it set (era ^ 5). "To <era>!" (9:7314, window de $0801) - A goes, B doesn't (0F:7A2C).
+  Seen: Present -> Past clears flag $0E (only flag change); ~270 frames: BGP to white and back
+  (frames 1-40), then a per-line sine scroll (wC880) up to 16 px from frame 47 to ~268 with a white
+  flash ~145-187; back on the bridge. The port's wave is an approximation of those numbers.
+- Talon cockpit details: "Attached X to Talon." comes first, over the field (box rows 10-17);
+  the hand sits right before its line (column 1 / 10 on screen). Text windows (00:3211): the
+  inside starts at row d, column e, the text one line down.

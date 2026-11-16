@@ -4,7 +4,7 @@
 // real game (PyBoy) with the same rules; tests/story_compare.py diffs the two logs.
 //
 // Steps: new | go D3 L2 ... | a | shop | jump | face D | battles on|off | npcs still|wander | wait N |
-//        keys A B S U D L R wN | settle | peek LABEL | check LABEL | expect map MM [row col] | == section name.
+//        keys A B S U D L R (U20 = held) wN | settle | peek LABEL | check LABEL | expect map MM [row col] | == section name.
 // '#' starts a comment. While the game isn't free (text, battle, menus, fades) the player mashes A
 // (not on a frame that already looks free). shop: talk, mash A until a shop opens, then B out of it.
 // npcs still: no random walks (the real ones use the game RNG with the frame count: not matchable).

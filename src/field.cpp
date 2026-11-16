@@ -201,7 +201,7 @@ bool Field::tryJump() {
 }
 
 bool Field::busy() const {
-    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_ || floatDrop_ || liftStep_ >= 0) return true;
+    if (!walks_.empty() || !glides_.empty() || flash_ || trans_ || spin_ || jump_ || floatDrop_ || liftStep_ >= 0 || warp_) return true;
     for (int i = 1; i < kSlots; i++)
         if (actors_[size_t(i)].moveFrames && !actors_[size_t(i)].wandering) return true;
     return false;
@@ -240,6 +240,15 @@ void Field::setVehicle(int mode) {
     p.spriteTile = (mode >= 0 && mode < 9) ? tile[mode] : 0;
     Actor& f = actors_[1];
     if (f.used) f.id = (mode >= 3 || mode == 1) ? 0 : f.savedId;   // the follower boards too (Float: 1586 drops it)
+}
+
+void Field::timeWarp(int era) {
+    if (era == 1) { flags_.event.set(0x0e); flags_.event.reset(0x0f); }
+    else if (era == 2) { flags_.event.reset(0x0e); flags_.event.reset(0x0f); }
+    else if (era == 4) { flags_.event.reset(0x0e); flags_.event.set(0x0f); }
+    // era 8 (Pureland): not seen yet
+    warp_ = kWarpFrames;
+    lastEvent_ = "time warp";
 }
 
 bool Field::canCast(uint8_t id) const {
@@ -381,6 +390,7 @@ void Field::wanderStep() {
 
 void Field::tick(int dir) {
     clock_++;
+    if (warp_) warp_--;
     if (trans_) { trans_--; return; }                    // fading: nothing moves
     if (floatDrop_ && --floatDrop_ == 0) {                // 4053: then vehicle 1, the party floats
         setVehicle(1);

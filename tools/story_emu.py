@@ -190,7 +190,8 @@ for ln, line in enumerate(steps, 1):
     elif op == 'keys':                                    # raw presses: A B S U D L R, wN = wait
         for tok in w[1:]:
             if tok[0] == 'w': [tick() for _ in range(int(tok[1:]))]; continue
-            for _ in range(3): tick((KEYS[tok],))
+            hold = int(tok[1:]) if len(tok) > 1 else 3    # U20: held 20 frames
+            for _ in range(hold): tick((KEYS[tok[0]],))
             for _ in range(12): tick()
     elif op == 'settle':
         if not mash_until_free(20000): fail(f'line {ln} never settled')

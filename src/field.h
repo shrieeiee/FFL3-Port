@@ -156,6 +156,7 @@ private:
     // arc (wCA13 counting down, height 01:4A3F), 1 px a frame; the landing gets its step event.
     struct Jump { int frame = 0; int blocks = 0; Dir d = Dir::Down; bool moves = false; };
     std::optional<Jump> jump_;
+    int warp_ = 0;                     // time warp frames left
     int floatDrop_ = 0;                // 01:4063: Float coming down onto the leader, 36 frames
     unsigned clock_ = 0;               // frames, for the float's bob
     int jumpHeight_[32] = {};
@@ -179,6 +180,11 @@ public:
     // $27/$28 moves swap the LCD handlers for the walk (00:1B2D ... 1B50): no text window.
     bool scriptWalking() const { return !walks_.empty(); }
     int floatDrop() const { return floatDrop_; }
+    // The Talon's time warp (cockpit Warp -> 01:7A3B): the era flags for wCDC0 (1 Present: $0E;
+    // 2 Past: neither; 4 Future: $0F), then ~270 frames of fades and a wavy screen.
+    void timeWarp(int era);
+    static constexpr int kWarpFrames = 270;
+    int warpTime() const { return warp_ ? kWarpFrames - warp_ : -1; }
     unsigned clock() const { return clock_; }
     int leaderLift() const {           // screen pixels the leader is drawn above its spot
         if (jump_) return jumpHeight_[(31 - jump_->frame) & 31];

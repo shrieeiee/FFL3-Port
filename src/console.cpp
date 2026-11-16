@@ -91,6 +91,15 @@ Glyphs TalonConsole::text(uint16_t addr, int ce94) const {
         if (c >= 0x4e) { for (uint8_t x : dict[size_t(c - 0x4e)]) code(x); return; }
         for (size_t i = 0; i < sizeof kLow; i++)
             if (kLow[i] == c) { for (uint8_t x : dict[58 + i]) code(x); return; }
+        if (c == 0x4d) {                                       // 00:306C: the era in wCDC0, 9:72B3 x 11
+            int i = 0;
+            while (i < 8 && !(warpEra_ & (1 << i))) i++;          // 00:1EE7: lowest bit set
+            Glyphs g;
+            for (int k = 0; k < 11; k++) g.push_back(rom_.b(9, uint16_t(0x72b3 + i * 11 + k)));
+            while (!g.empty() && g.back() == 0xff) g.pop_back();
+            out.insert(out.end(), g.begin(), g.end());
+            return;
+        }
         if (c == 0x06) out.push_back(kNl);
         else if (c == 0x09) { const int n = rom_.b(9, p++); for (int i = 0; i < n; i++) out.push_back(0xff); }
         else if (c == 0x1e) {                                 // 00:280F: $40-$4F = part n + $98 if attached,
@@ -108,6 +117,13 @@ Glyphs TalonConsole::text(uint16_t addr, int ce94) const {
         code(c);
     }
     return out;
+}
+
+int TalonConsole::era() const {
+    if (flags_.test(5)) return 8;
+    if (flags_.test(0x0e)) return 1;
+    if (flags_.test(0x0f)) return 4;
+    return 2;
 }
 
 // 01:79B3 (Depart is allowed) and 01:63E6 (which mode the Talon flies in).
@@ -140,6 +156,10 @@ void TalonConsole::tick(const ConsoleInput& in) {
     case State::Message:
         if (in.a || in.b) state_ = State::Menu;
         return;
+    case State::Confirm:                                      // 0F:7A2C: A goes, B doesn't (7A35)
+        if (in.b) { state_ = State::Menu; return; }
+        if (in.a) { result_ = 2; state_ = State::Done; }     // 7A3B: rst $18 $09
+        return;
     case State::Menu:
         if (in.up) option_ = (option_ + 4) % 5;               // 7A92 / 7AA1: wraps
         if (in.down) option_ = (option_ + 1) % 5;
@@ -167,9 +187,20 @@ void TalonConsole::tick(const ConsoleInput& in) {
         if (sub_ >= limit || !owned(item)) { sfx(0x3b); return; }
         if (option_ == 1) ram_[0xc6fa] = item;                 // 7AE2: engine
         else if (option_ == 3) ram_[0xc6fb] = item;            // 7B3C: weapon
-        else {                                                // 7B12: warp - not in the port yet
-            messageGlyphs_ = asciiGlyphs("Warp: not yet");
-            state_ = State::Message;
+        else {                                                // 7B12: wCA50 = the unit, out of the menu
+            // 79E9 with b = wCA50 + 1: the era it goes to (bits: 1 Present, 2 Past, 4 Future, 8 Pureland)
+            const int b = sub_ + 1;
+            int to = -1;
+            if (b == 3) to = 8;                                     // the third unit: Pureland
+            else if (flags_.test(5)) to = -1;                       // 7A3E: no
+            else if (flags_.test(0x0e)) to = era() ^ (b == 1 ? 3 : 5);   // 7A19
+            else if (b == 1) to = flags_.test(0x0f) ? -1 : era() ^ 3;    // 7A03
+            else to = flags_.test(0x0f) ? era() ^ 5 : -1;                 // 7A0E
+            if (to < 0) { sfx(0x3b); state_ = State::Menu; return; }     // 1E83, 7A72
+            warpEra_ = to;
+            Glyphs g = text(0x7314);                              // "To <era>!" (00:306C: name 9:72B3)
+            messageGlyphs_ = g;
+            state_ = State::Confirm;
             return;
         }
         messageGlyphs_ = text(0x782c);                        // 7B5B: "Set completed!"
@@ -187,7 +218,7 @@ int TalonConsole::cursorRow() const {
     return -1;
 }
 
-int TalonConsole::cursorCol() const { return state_ == State::Sub ? 10 : 1; }
+int TalonConsole::cursorCol() const { return state_ == State::Sub ? 11 : 2; }   // the hand right before the line
 
 std::array<uint8_t, 360> TalonConsole::screen() const {
     Screen s{};
@@ -195,10 +226,10 @@ std::array<uint8_t, 360> TalonConsole::screen() const {
     static const uint16_t top[5] = {0x7798, 0x77d9, 0x780c, 0x783b, 0x7866};
     static const uint16_t right[5] = {0, 0x7802, 0x7822, 0x7856, 0x7882};
     static const uint16_t prompt[5] = {0, 0x77f4, 0x7813, 0x7844, 0x786f};
-    const int opt = (state_ == State::Sub || state_ == State::Message) ? option_ : 0;
+    const int opt = (state_ == State::Sub || state_ == State::Message || state_ == State::Confirm) ? option_ : 0;
     box(s, 1, 1, 18, 4);
     put(s, 1, 2, 18, 3, text(top[opt]), 2);
-    if (state_ == State::Sub && prompt[opt]) {
+    if ((state_ == State::Sub || state_ == State::Confirm) && prompt[opt]) {
         for (int c = 1; c < 19; c++) s[size_t(4 * 20 + c)] = 0xff;
         put(s, 1, 4, 18, 1, text(prompt[opt]), 2);
     }
@@ -206,15 +237,23 @@ std::array<uint8_t, 360> TalonConsole::screen() const {
     put(s, 1, 8, 7, 9, text(0x77b6), 2);
     box(s, 10, 7, 9, 10);
     if (right[opt]) put(s, 10, 8, 9, 9, text(right[opt]), 2);
-    if (state_ == State::Message) {
-        box(s, 3, 10, 14, 2);
-        for (int r = 10; r < 12; r++) for (int c = 3; c < 17; c++) s[size_t(r * 20 + c)] = 0xff;
-        put(s, 3, 10, 14, 2, messageGlyphs_, 1);
+    // Text windows (00:3211, de = row/column, bc = height/width): the inside starts at row d,
+    // column e, and the text one line down (emulator: "To Past!" on row 9 for d = 8).
+    if (state_ == State::Confirm) {                         // 7A26: de $0801, bc $0212
+        box(s, 1, 8, 18, 2);
+        for (int r = 8; r < 10; r++) for (int c = 1; c < 19; c++) s[size_t(r * 20 + c)] = 0xff;
+        put(s, 1, 9, 18, 1, messageGlyphs_, 1);
     }
-    if (state_ == State::Attach) {                           // 01:7C5B: "Attached X to Talon."
-        box(s, 1, 1, 18, 6);
-        for (int r = 1; r < 7; r++) for (int c = 1; c < 19; c++) s[size_t(r * 20 + c)] = 0xff;
-        put(s, 2, 2, 17, 5, text(0x7889, attached_.front()), 2);
+    if (state_ == State::Message) {
+        box(s, 3, 10, 14, 2);                                // 7B5B: de $0A03, bc $020E
+        for (int r = 10; r < 12; r++) for (int c = 3; c < 17; c++) s[size_t(r * 20 + c)] = 0xff;
+        put(s, 3, 11, 14, 1, messageGlyphs_, 1);
+    }
+    if (state_ == State::Attach) {                           // 01:7C5B: "Attached X to Talon." - over the
+        s.fill(0);                                           // field, before the cockpit is drawn
+        box(s, 1, 11, 18, 6);
+        for (int r = 11; r < 17; r++) for (int c = 1; c < 19; c++) s[size_t(r * 20 + c)] = 0xff;
+        put(s, 1, 12, 18, 5, text(0x7889, attached_.front()), 2);
     }
     return s;
 }

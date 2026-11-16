@@ -18,7 +18,8 @@ public:
     TalonConsole(const Rom& rom, BattleRam& ram, GameFlags& flags);
     void tick(const ConsoleInput& in);
     bool done() const { return state_ == State::Done; }
-    int result() const { return result_; }      // wCA57: 1 = take off, 0 = closed
+    int result() const { return result_; }      // wCA57: 1 = take off, 2 = warp, 0 = closed
+    int warpEra() const { return warpEra_; }      // wCDC0 for a warp: 1 Present, 2 Past, 4 Future, 8 Pureland
     int takeOffMode() const;                      // 01:63E6: vehicle mode 3-8
     std::array<uint8_t, 20 * 18> screen() const;
     int cursorRow() const;
@@ -27,7 +28,8 @@ public:
     std::function<void(int id)> playSfx;
 
 private:
-    enum class State { Attach, Menu, Sub, Message, Done };
+    enum class State { Attach, Menu, Sub, Message, Confirm, Done };
+    int era() const;                              // 0F:7BA7
     Glyphs text(uint16_t addr, int ce94 = -1) const;   // bank 9 text -> glyphs (6 = newline)
     void openSub(int option);
     void sfx(int id) { if (playSfx) playSfx(id); }
@@ -36,7 +38,7 @@ private:
     BattleRam& ram_;
     GameFlags& flags_;
     State state_ = State::Menu;
-    int option_ = 0, sub_ = 0, result_ = 0;
+    int option_ = 0, sub_ = 0, result_ = 0, warpEra_ = 0;
     std::vector<uint8_t> attached_;               // parts attached on opening (messages)
     std::string message_;
     Glyphs messageGlyphs_;

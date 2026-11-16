@@ -135,3 +135,14 @@ go U11
 check aboard
 go D22                                # down the deck (the lift: flashes, re-laid walkway) to the step text
 check bridge                          # map 10, the Talon's bridge
+
+== warp to the Past (cockpit, the seat at 5,16: event $23)
+go U1
+keys U20 w90                          # onto the seat: the cockpit, "Attached Past to Talon."
+peek attached
+keys A w60 D w60 D w60 A w60          # past the message, down to Warp, in
+peek warp_menu
+keys A w90                            # Past
+peek to_past
+keys A w400                           # yes: the warp (fades, the wavy screen)
+check in_the_past                     # flag 0E cleared: the era is the Past

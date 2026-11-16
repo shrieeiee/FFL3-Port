@@ -405,6 +405,7 @@ int main(int argc, char** argv) {
     };
     auto consoleDone = [&] {
         if (console->result() == 1) { text.close(); field.takeOff(console->takeOffMode()); }
+        if (console->result() == 2) { text.close(); field.timeWarp(console->warpEra()); }
         console.reset();
     };
     auto openMenu = [&] {
@@ -1652,6 +1653,25 @@ int main(int argc, char** argv) {
             else renderField(field, tiles, fo, frame, debug ? &tint : nullptr);
             // The window hides during a scripted walk, and goes white with the BG in a flash (BGP = 0).
             if (t >= 50 && !field.scriptWalking() && !field.flashWhite()) renderTextBox(text, tiles, opts, frame);
+            if (const int wt = field.warpTime(); wt >= 0) {
+                // Time warp (emulator-measured): BGP fades to white and back (shade levels), and
+                // from frame 47 each line slides sideways (a wave through wC880, up to 16 px).
+                static const int fade[][2] = {{1, 1}, {6, 2}, {11, 3}, {30, 2}, {35, 1}, {40, 0}, {145, 1},
+                                              {150, 2}, {151, 3}, {175, 2}, {181, 1}, {187, 0}};
+                int lv = 0;
+                for (const auto& f : fade) if (wt >= f[0]) lv = f[1];
+                if (wt >= 47) {
+                    const double amp = wt < 160 ? std::min(16.0, (wt - 47) / 7.0) : wt < 200 ? 16.0 : 16.0 * (268 - wt) / 68.0;
+                    std::vector<uint8_t> row(size_t(frame.w));
+                    for (int y = 0; y < frame.h; y++) {
+                        const int off = int(std::lround(std::max(0.0, amp) * std::sin(6.2831853 * ((wt - 47) / 32.0 + y / 48.0))));
+                        uint8_t* r = &frame.px[size_t(y) * frame.w];
+                        for (int x = 0; x < frame.w; x++) row[size_t(x)] = r[((x + off) % frame.w + frame.w) % frame.w];
+                        std::copy(row.begin(), row.end(), r);
+                    }
+                }
+                if (lv) for (uint8_t& px : frame.px) px = uint8_t(std::max(0, int(px) - lv));
+            }
             if (const int lv = field.fadeLevel(); lv)
                 for (uint8_t& px : frame.px) px = uint8_t(std::max(0, int(px) - lv));
             if (shop) renderShop(*shop, tiles, opts, frame);

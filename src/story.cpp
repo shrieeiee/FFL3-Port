@@ -175,7 +175,8 @@ AnimTask StoryPlayer::run() {
                 if (t[0] == 'w') { const int n = std::atoi(t.c_str() + 1); for (int f = 0; f < n; f++) co_await tick(); continue; }
                 uint8_t k = dirKey(t[0]);
                 if (t[0] == 'A') k = A; else if (t[0] == 'B') k = B; else if (t[0] == 'S') k = Start;
-                for (int f = 0; f < 3; f++) co_await tick(k);
+                const int hold = t.size() > 1 ? std::atoi(t.c_str() + 1) : 3;   // U20: held 20 frames
+                for (int f = 0; f < hold; f++) co_await tick(k);
                 for (int f = 0; f < 12; f++) co_await tick();
             }
         } else if (op == "settle") {
