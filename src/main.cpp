@@ -528,9 +528,10 @@ int main(int argc, char** argv) {
             for (int c = 0; c < field.cols(); c++) std::fprintf(gf, "%s%02X/%02X", c ? " " : "", field.blockAt(r, c), field.attrAt(r, c));
             std::fprintf(gf, "\n");
         }
-        for (int i = 1; i < Field::kSlots; i++) {
+        for (int i = 2; i < Field::kSlots; i++) {
             const Actor& a = field.actors()[size_t(i)];
-            if (a.visible()) std::fprintf(gf, "obj %d,%d\n", a.row, a.col);
+            if (a.visible() && !(a.obj.flagsY & 0x40))   // the ones that stop the leader (01:465F)
+                std::fprintf(gf, "obj %d,%d\n", a.row, a.col);
         }
         std::fclose(gf);
     };
@@ -970,6 +971,10 @@ int main(int argc, char** argv) {
             field.encounters = line.find("off") == std::string::npos;
             return std::string(field.encounters ? "random battles on" : "random battles off");
         }
+        if (k == "npcs") {                                      // npcs still / wander (story runs: the real RNG can't be matched)
+            field.npcsStill = line.find("still") != std::string::npos;
+            return std::string(field.npcsStill ? "NPCs stand still" : "NPCs wander");
+        }
         if (k == "normal") {
             for (const char* v : {"FFL3_FORCEFX", "FFL3_FORCEEFFECT", "FFL3_DEATHSTYLE", "FFL3_AREA", "FFL3_POKE"}) setDbgEnv(v, "");
             field.encounters = true;
@@ -1344,6 +1349,7 @@ int main(int argc, char** argv) {
         v.loop = !opening && !prologue && !battle && !shop && !menu && !console && !text.active() &&
                  !field.busy() && field.transition() == 0;
         v.free = v.loop && p.moveFrames == 0;
+        v.shop = bool(shop);
         v.map = field.mapId(); v.row = p.row; v.col = p.col;
         char b[8];
         for (const auto* bits : {&flags.event, &flags.chest})     // wC760 and wC780, 32 bytes each

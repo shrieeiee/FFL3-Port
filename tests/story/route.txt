@@ -8,6 +8,7 @@ check after_opening                   # aboard the Talon (map 0B 26,7)
 battles off                           # random battles differ between the two (and can wipe the
                                       # party): the route is about places and story; battles have
                                       # their own tests
+npcs still                            # wandering uses the real RNG (hFF93 frame count): not matchable
 
 == leave the Talon
 go U22                                # up the deck (the lift carries you) to the nose
@@ -81,3 +82,16 @@ go D2 L2 U7 L5
 jump
 go D4 L9                              # over the cure floor ($E1)
 check canal_walkway    # back in map 20, up on the walkway (flags $45)
+
+== into the round tower (map 25)
+go D1 L4 D2 L2
+face U                                # onto the doorway object: it doesn't block (row bit 6, 01:465F)
+check tower_door
+go U1
+check tower_25
+
+== Granny: her speech, then her spell shop (left with B)
+go U1
+face U
+shop
+check granny

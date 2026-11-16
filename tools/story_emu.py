@@ -28,6 +28,7 @@ pb.hook_register(0, 0x0265, lambda ctx: st.__setitem__('loop', True), None)
 # (01:4BF6) have all had their turn with nothing to do: the game is waiting for a direction.
 st['ready'] = -10
 pb.hook_register(0, 0x07d6, lambda ctx: st.__setitem__('ready', frame), None)
+pb.hook_register(1, 0x6fd4, lambda ctx: st.__setitem__('shop', frame), None)   # a shop opens
 if os.environ.get('STORY_TXT'):                           # debug: log every text the game opens (00:3211)
     pb.hook_register(0, 0x3211, lambda ctx: print(f'TXT frame {frame} bank {pb.memory[0x2000] if False else "?"}'), None)
 
@@ -48,6 +49,10 @@ def state():
 
 free_run = 0
 no_battles = [False]
+npcs_still = [False]
+def _no_wander(_):                                        # 01:5092: just after the wander roll (00:39D5)
+    if npcs_still[0]: mem[0xff90] |= 0x04                 # & $FC != 0: no step this time
+pb.hook_register(1, 0x5092, _no_wander, None)
 def tick(keys=()):
     """One frame with these buttons held; tracks how many frames in a row we've been free."""
     global frame, free_run
@@ -80,7 +85,7 @@ def mash_until_free(limit, start=False):
     while not free():
         if n >= limit: return False
         k = ()
-        if n % 16 < 2: k = ('a', 'start') if start and (n // 16) % 4 == 3 else ('a',)
+        if n % 16 < 2 and free_run == 0: k = ('a', 'start') if start and (n // 16) % 4 == 3 else ('a',)
         tick(k); n += 1
     return True
 
@@ -148,6 +153,18 @@ for ln, line in enumerate(steps, 1):
         if not mash_until_free(20000): fail(f'line {ln} stuck before A')
         tick(('a',)); tick(('a',)); tick(); tick()
         if not mash_until_free(20000): fail(f'line {ln} stuck after A')
+    elif op == 'shop':                                    # talk to a seller: through the speech, then out (B)
+        if not mash_until_free(20000): fail(f'line {ln} stuck before shop')
+        st['shop'] = -1
+        tick(('a',)); tick(('a',)); tick(); tick()
+        n = 0
+        while not free() and st.get('shop', -1) < 0:
+            if n >= 20000: fail(f'line {ln} no shop'); break
+            tick(('a',) if n % 16 < 2 else ()); n += 1
+        n = 0
+        while not free():
+            if n >= 20000: fail(f'line {ln} stuck in the shop'); break
+            tick(('b',) if n % 16 < 2 else ()); n += 1
     elif op == 'jump':                                    # B: jump the way the leader faces
         if not mash_until_free(20000): fail(f'line {ln} stuck before jump')
         tick(('b',)); tick(('b',)); tick(); tick()
@@ -156,6 +173,8 @@ for ln, line in enumerate(steps, 1):
         mash_until_free(20000)
         tick((DIRS[w[1][0]],)); tick()
         mash_until_free(20000)
+    elif op == 'npcs':                                    # npcs still / wander
+        npcs_still[0] = len(w) > 1 and w[1] == 'still'
     elif op == 'battles':                                 # random encounters on / off
         no_battles[0] = len(w) > 1 and w[1] == 'off'
     elif op == 'wait':

@@ -145,6 +145,18 @@ bool Field::occupied(int row, int col, int selfSlot) const {
     return false;
 }
 
+// 01:465F: what stops the leader - map objects (slot 2 on) on that block, except those whose row
+// byte has bit 6 (wC360 bit 6, 00:0608): walked onto, like the doorway object in map $20.
+bool Field::blocksLeader(int row, int col) const {
+    row = wrap(row, rows());
+    col = wrap(col, cols());
+    for (int i = 2; i < kSlots; i++) {
+        const Actor& a = actors_[size_t(i)];
+        if (a.visible() && a.row == row && a.col == col && !(a.obj.flagsY & 0x40)) return true;
+    }
+    return false;
+}
+
 // 01:4B5E / 4BA7 on a block ahead (00:1060 loads its attr, 01:4EE1 the leader's flags for it).
 bool Field::jumpWall(int r, int c) const {
     const uint8_t a = attrAt(r, c), cls = a & 0xc0;
@@ -163,7 +175,7 @@ bool Field::jumpLand(int r, int c) const {
     if ((blockAt(r, c) & 0x40) != layer_) return false;
     if (a == 0xeb || a == 0xc1 || a == 0xc3 || a == 0xc5 || a == 0xcc || a == 0xe4 || (a & 0x70) == 0x30) return false;
     if (f & 7 & x) return false;
-    return !occupied(r, c, 0);                                        // 01:464F
+    return !blocksLeader(r, c);                                       // 01:464F
 }
 
 bool Field::tryJump() {
@@ -342,6 +354,7 @@ void Field::boulderLanded(int slot) {
 // 01:4F66 / 5060: move types 0-3 and $1B-$1E take a random step about once every 64 frames
 // (rnd & $FC == 0), at 1 px per frame; the facing changes even when the way is blocked.
 void Field::wanderStep() {
+    if (npcsStill) return;
     for (int i = 2; i < kSlots; i++) {
         Actor& a = actors_[size_t(i)];
         if (!a.visible() || a.proxy || a.moveFrames) continue;
@@ -446,7 +459,7 @@ void Field::tick(int dir) {
     const Dir d = Dir(dir);
     p.facing = d;
     const int nr = p.row + kDr[dir], nc = p.col + kDc[dir];
-    if (!noClip && (!passable(nr, nc) || (occupied(nr, nc, 0) && !tryPush(nr, nc, d)))) return;
+    if (!noClip && (!passable(nr, nc) || (blocksLeader(nr, nc) && !tryPush(nr, nc, d)))) return;
     startMove(0, d, true, speedPx(leaderSpeed_));
 }
 
@@ -466,11 +479,11 @@ bool Field::conveyor(int dir) {
         else {
             const int nr = p.row + kDr[dir], nc = p.col + kDc[dir];
             p.facing = Dir(dir);
-            if (passable(nr, nc) && !occupied(nr, nc, 0)) { startMove(0, Dir(dir), true, speedPx(leaderSpeed_)); return true; }
+            if (passable(nr, nc) && !blocksLeader(nr, nc)) { startMove(0, Dir(dir), true, speedPx(leaderSpeed_)); return true; }
         }
     }
     const int nr = p.row + kDr[c], nc = p.col + kDc[c];
-    if (!passable(nr, nc) || occupied(nr, nc, 0)) return true;      // 4645 fails: wCA30 = 1, stays put
+    if (!passable(nr, nc) || blocksLeader(nr, nc)) return true;     // 4645 fails: wCA30 = 1, stays put
     startMove(0, Dir(c), true, speedPx(s));
     return true;
 }

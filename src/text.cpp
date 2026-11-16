@@ -97,9 +97,11 @@ void TextBox::newline() {
     col_ = 0;
     if (row_ < kRows - 1) { row_++; return; }
     // Full window: the game scrolls up a line by itself (no key wait). Waits come from
-    // explicit codes ($1C before each new speaker, $0B, $08, $10).
-    for (int r = 0; r < kRows - 1; r++) lines_[size_t(r)] = lines_[size_t(r) + 1];
-    lines_[kRows - 1].fill(0xff);
+    // explicit codes ($1C before each new speaker, $0B, $08, $10). The scroll (00:342C) costs a
+    // character's wait first (3593: 1 + wCED9 frames, A held skips it), then the rows move up.
+    row_ = kRows - 1;
+    state_ = State::WaitScroll;
+    scrollWait_ = kCharDelay;
     if (waitBeforeNextLine_) { waitBeforeNextLine_ = false; }
 }
 
@@ -255,7 +257,8 @@ void TextBox::tick(bool aPressed, bool aHeld, bool upPressed, bool downPressed) 
         }
         return;
     case State::WaitScroll:
-        if (aPressed) {
+        if (scrollWait_ > 0 && !aHeld) { scrollWait_--; return; }
+        {
             for (int r = 0; r < kRows - 1; r++) lines_[size_t(r)] = lines_[size_t(r) + 1];
             lines_[kRows - 1].fill(0xff);
             row_ = kRows - 1;

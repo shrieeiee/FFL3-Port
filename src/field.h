@@ -90,6 +90,7 @@ public:
     std::function<void(int id)> playSfx;
     std::function<void(const char*)> onUnknownEvent;   // an event the port has no code for yet (logged for testers)
     bool wander = false;               // NPC random walks (01:4F66); off for headless tests
+    bool npcsStill = false;            // debug / story runs: no random walks at all
     // The Talon: the spot it is parked at (wC6E9-C6ED), flying off from it and landing.
     struct Spot { int map, row, col; };
     Spot savedSpot() const { return {saved_.map, saved_.row, saved_.col}; }
@@ -117,6 +118,7 @@ public:
 
 private:
     bool occupied(int row, int col, int selfSlot) const;
+    bool blocksLeader(int row, int col) const;
     uint8_t vehicleMask() const;
     void onStepDone();
     bool warpTo(int map, uint8_t b2, uint8_t b3);   // 00:1468 - map, row|facing, col|facing

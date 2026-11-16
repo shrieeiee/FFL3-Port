@@ -3,9 +3,11 @@
 // and logs a checkpoint line per check / expect. tools/story_emu.py plays the same file on the
 // real game (PyBoy) with the same rules; tests/story_compare.py diffs the two logs.
 //
-// Steps: new | go D3 L2 ... | a | jump | face D | battles on|off | wait N | keys A B S U D L R wN | settle | check LABEL |
-//        expect map MM [row col] | == section name.   '#' starts a comment.
-// While the game isn't free (text, battle, menus, fades) the player mashes A.
+// Steps: new | go D3 L2 ... | a | shop | jump | face D | battles on|off | npcs still|wander | wait N |
+//        keys A B S U D L R wN | settle | peek LABEL | check LABEL | expect map MM [row col] | == section name.
+// '#' starts a comment. While the game isn't free (text, battle, menus, fades) the player mashes A
+// (not on a frame that already looks free). shop: talk, mash A until a shop opens, then B out of it.
+// npcs still: no random walks (the real ones use the game RNG with the frame count: not matchable).
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -18,6 +20,7 @@ namespace ffl3 {
 struct StoryView {
     bool loop = false;          // the field main loop runs (no text, battle, menu, fade)
     bool free = false;          // ... and the leader stands on the grid: it would take a step now
+    bool shop = false;          // a shop is open (01:6FD4)
     int map = 0, row = 0, col = 0;
     std::string flags;          // wC760-C77F as hex
     std::string party;          // "hp/max ..." for members 1-4

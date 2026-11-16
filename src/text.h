@@ -45,7 +45,7 @@ public:
 
     // Window contents for the renderer: kRows lines of tile numbers ($FF = blank).
     const std::array<std::array<uint8_t, kCols>, kRows>& lines() const { return lines_; }
-    bool waitingForA() const { return state_ == State::WaitA || state_ == State::WaitScroll || state_ == State::WaitEnd; }
+    bool waitingForA() const { return state_ == State::WaitA || state_ == State::WaitEnd; }
     bool choosing() const { return state_ == State::Choice; }
     int choice() const { return choice_; }
     int blink() const { return blink_; }
@@ -84,6 +84,7 @@ private:
     int row_ = 0, col_ = 0;
     bool active_ = false;
     State state_ = State::Idle;
+    int scrollWait_ = 0;      // 00:342C: a character's wait before the scroll
     int delay_ = 0, blink_ = 0, choice_ = 0;
     uint8_t choiceA_[2]{}, choiceB_[2]{};
     std::vector<uint8_t> pendingGlyphs_;

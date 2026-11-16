@@ -424,3 +424,12 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
 - A jump settles the leader's layer flags on each block it passes, like a step (4E48; RAM: $45
   after landing on a $12 walkway). The port kept the take-off flags, so it could jump off a
   walkway onto plain ground where the real game stays put (map 22, 5,34).
+- Text scroll (00:342C) never waits for a key: when the box is full it costs one character's wait
+  (3593: 1 + wCED9 frames, A held skips) and then the rows move up. Long speeches (Granny) run with
+  no A at all until a $08/$0B/$10. Characters are 11-13 frames apart in practice (11 + the odd lag
+  frame); B held pauses the countdown (3593).
+- The leader's object check (01:465F) skips objects with wC360 bit 6 (00:0608: the row byte's
+  bit 6), e.g. the doorway object of the round tower in map $20; and an object whose wC2E0 has
+  bit 3 only blocks on the same layer as the leader (wC804).
+- NPC random walks (01:5060) roll 00:39D5: hFF90 += rrca((hFF93 + hFF90) ^ 1), hFF93 being the
+  frame count - not something the port can match frame for frame.

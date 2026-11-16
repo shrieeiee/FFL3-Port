@@ -54,7 +54,7 @@ AnimTask StoryPlayer::mashUntilFree(int limit, bool start, bool* ok) {
     for (int n = 0; !isFree(); n++) {
         if (n >= limit) { *ok = false; co_return; }
         uint8_t k = 0;
-        if (n % 16 < 2) k = start && (n / 16) % 4 == 3 ? uint8_t(A | Start) : uint8_t(A);
+        if (n % 16 < 2 && freeRun_ == 0) k = start && (n / 16) % 4 == 3 ? uint8_t(A | Start) : uint8_t(A);
         co_await tick(k);
     }
 }
@@ -139,6 +139,18 @@ AnimTask StoryPlayer::run() {
             co_await tick(A); co_await tick(A); co_await tick(); co_await tick();
             co_await mashUntilFree(20000, false, &ok);
             if (!ok) { fail(at + " stuck after A"); co_return; }
+        } else if (op == "shop") {                                      // talk to a seller: through the speech, then out
+            co_await mashUntilFree(20000, false, &ok);                   // (B, without buying) once the shop opens
+            if (!ok) { fail(at + " stuck before shop"); co_return; }
+            co_await tick(A); co_await tick(A); co_await tick(); co_await tick();
+            for (int n = 0; !v_.free && !v_.shop; n++) {
+                if (n >= 20000) { fail(at + " no shop"); co_return; }
+                co_await tick(n % 16 < 2 ? A : 0);
+            }
+            for (int n = 0; !v_.free; n++) {
+                if (n >= 20000) { fail(at + " stuck in the shop"); co_return; }
+                co_await tick(n % 16 < 2 ? B : 0);
+            }
         } else if (op == "jump") {                                      // B: jump the way the leader faces
             co_await mashUntilFree(20000, false, &ok);
             if (!ok) { fail(at + " stuck before jump"); co_return; }
@@ -150,6 +162,8 @@ AnimTask StoryPlayer::run() {
             co_await tick(dirKey(s.w.size() > 1 ? s.w[1][0] : 'D'));
             co_await tick();
             co_await mashUntilFree(20000, false, &ok);
+        } else if (op == "npcs") {                                      // npcs still / wander
+            if (onCommand) onCommand("npcs " + (s.w.size() > 1 ? s.w[1] : std::string("wander")));
         } else if (op == "battles") {                                   // random encounters on / off
             if (onCommand) onCommand("battles " + (s.w.size() > 1 ? s.w[1] : std::string("on")));
         } else if (op == "wait") {
