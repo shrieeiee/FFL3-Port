@@ -95,3 +95,19 @@ go U1
 face U
 shop
 check granny
+
+== to Cronos, in the largest house (map 21)
+go D2
+check out_of_tower
+go D1 R2 U3 R5                        # the walkway's C5: a return - back up the stack to map 22
+check back_on_22
+go U2 R2 U1 R2 U1 R4 U1 R2 D1 R5 D7 R2 U3
+check back_in_inn
+go U1 R2 D7
+check main_street
+go D3 L1 D2 L1 D4 L1 D1 L5 U3
+check cronos_house
+go U9
+face U
+a
+check cronos                          # takes the Radar, gives Past
