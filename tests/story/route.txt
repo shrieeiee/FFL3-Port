@@ -146,3 +146,26 @@ keys A w90                            # Past
 peek to_past
 keys A w400                           # yes: the warp (fades, the wavy screen)
 check in_the_past                     # flag 0E cleared: the era is the Past
+
+== out of the Talon into the Past
+go D3                                 # $FF: back to the deck
+check deck_past
+go U22                                # up the deck (the lift), out through the swirl
+check temple_top_past
+go D12                                # down the stairs: the step text takes you outside
+check past_overworld
+go D4 R4 U1 R2 U9 R4                  # to the Elder, out looking for a place for a town
+face R
+a                                     # he'll build it east of the Palace: Dharm (flag 58 cleared)
+check elder_past
+
+== Float over to the canal town in the Past (map 26)
+keys S w40 D w10 A w30 A w30 A w30
+keys A w120
+check afloat_past
+go D1 L15 D3 L12 U2 L3
+settle
+keys B w30                            # down off the float below the gate
+check below_town_past
+go U1
+check town_past                       # map 26
