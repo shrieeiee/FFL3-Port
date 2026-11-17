@@ -169,3 +169,26 @@ keys B w30                            # down off the float below the gate
 check below_town_past
 go U1
 check town_past                       # map 26
+
+== Granny's house in the Past (map 27): Cronos
+go D9 L2 D2 L1 D8 L1 D7 R4 U3
+check granny_house_past
+go U1
+face U
+a                                     # Cronos: Granny went to rescue Lara in the cave
+check cronos_past
+
+== to Dogra's cavern (map 42)
+go D3
+check out_of_granny_house
+go D2 L4 U17 R1 U5 R2 U5
+check out_of_town_past
+keys S w40 D w10 A w30 A w30 A w30
+keys A w120
+check afloat_to_cavern
+go R1 D5 R3 D8 L3 D13 R5 U1 R7 D1 R7 U4 L1
+settle
+keys B w30
+check below_cavern
+go U1
+check cavern                          # map 42
