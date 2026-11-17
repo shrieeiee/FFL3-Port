@@ -192,3 +192,19 @@ keys B w30
 check below_cavern
 go U1
 check cavern                          # map 42
+
+== Granny in the cavern
+go D4 R7 D14 L8
+face L
+a                                     # Granny: Lara was taken by Dogra
+check granny_cavern
+
+== down through the cavern to Lara
+go L1 D3                              # the warp at 23,11 -> 54,45
+check cavern_54
+go D2 R8 U2 R1 U16 L5 D1 L2 D1 L2 D2  # the warp at 42,45 -> map 43 30,15
+check cave_43
+go D2 R8 D5 L4 U1 L12 U3               # the warp at 33,7 -> map 42 47,39
+check lara_pocket
+# next: Flushex (map 40: "Flushex can turn monsters into humans") - talking to Lara now is a
+# fixed battle ($7F) that mashing never ends, on both sides
