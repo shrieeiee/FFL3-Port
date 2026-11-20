@@ -1083,7 +1083,7 @@ int main(int argc, char** argv) {
     // every 16 frames), the most frames it may take, and what must appear in its event log.
     struct AutoSpec { const char* name; const char* keys; int frames; const char* expect; };
     static const AutoSpec kAuto[] = {
-        {"Opening", "mash start", 20000, "battle: formation"},
+        {"Opening", "mash start", 40000, "battle: formation"},
         {"Panel lights", "", 240, "TILES"},
         {"Sea animation", "", 240, "TILES"},
         {"Talon deck", "20:Down:20", 240, "entered map 10"},

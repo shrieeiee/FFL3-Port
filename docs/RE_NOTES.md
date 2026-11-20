@@ -453,3 +453,7 @@ Translated in src/battleanim.cpp (C++20 coroutines; 00:3A6D "wait a frames" = co
 - Talon cockpit details: "Attached X to Talon." comes first, over the field (box rows 10-17);
   the hand sits right before its line (column 1 / 10 on screen). Text windows (00:3211): the
   inside starts at row d, column e, the text one line down.
+- Text timing (emulator, map 42 Lara): after the A the window wipes open (frames 4-18), the first
+  letter shows on frame 29, then one every ~11 frames. Names (party, speakers, items, spells) are
+  printed a letter at a time too (00:310F copies through the character routine). The port opened
+  the box at once and dropped whole names in one step, so speech ran ~2x ahead around names.

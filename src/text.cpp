@@ -62,7 +62,10 @@ void TextBox::open(int bank, uint16_t addr) {
     clear();
     active_ = true;
     state_ = State::Run;
-    delay_ = 0;
+    // The window wipes open first (00:3211, emulator: frames 4-18 after the A), then the usual
+    // character wait: the first letter shows on frame 29, the rest 11 apart.
+    openWait_ = kOpenWait;
+    delay_ = kCharDelay;
     pendingGlyphs_.clear();
 }
 
@@ -77,13 +80,21 @@ int TextBox::next() {
     while (!stack_.empty()) {
         Src& s = stack_.back();
         if (s.isBuf) {
-            if (s.pos < s.buf.size()) return s.buf[s.pos++];
+            if (s.pos < s.buf.size()) return s.buf[s.pos++] | (s.isRaw ? 0x100 : 0);
             stack_.pop_back();           // dictionary word finished
             continue;
         }
         return rom_.b(s.bank, s.addr++);
     }
     return -1;
+}
+
+// Names and item names go out a letter per character wait, like the game's copy loop (00:310F),
+// through a buffer source the way dictionary words do.
+void TextBox::spell(const std::vector<uint8_t>& glyphs) {
+    if (glyphs.empty()) return;
+    Src s; s.isBuf = true; s.isRaw = true; s.buf = glyphs;
+    stack_.push_back(s);
 }
 
 void TextBox::putGlyph(uint8_t t) {
@@ -141,7 +152,7 @@ void TextBox::step() {
         const int v = next();
         if (v < 0) { finish(); return; }
         const uint8_t b = uint8_t(v);
-        if (b >= 0x88) { putGlyph(b); return; }
+        if (b >= 0x88 || (v & 0x100)) { putGlyph(b); return; }   // ($100: a glyph from spell())
         // Dictionary word?
         int di = -1;
         if (b >= 0x4e) di = b - 0x4e;
@@ -188,7 +199,7 @@ void TextBox::step() {
                 for (int i = 0; i < 6; i++) name.push_back(rom_.b(7, uint16_t(0x7a88 + (m - 0x0c) * 0x60 + i)));
                 while (!name.empty() && name.back() == 0xff) name.pop_back();
             }
-            for (uint8_t t : name) putGlyph(t);
+            spell(name);
             break;
         }
         case 0x36: if (flags) flags->event.set(a[0]); break;
@@ -223,7 +234,9 @@ void TextBox::step() {
             if (a[0] == 0xff) break;
             const bool spell = a[0] < 0x30;
             const uint16_t p = spell ? uint16_t(0x6d9b + a[0] * 6) : uint16_t(0x6ebb + (a[0] - 0x30) * 8);
-            for (int i = 0; i < (spell ? 6 : 8); i++) putGlyph(rom_.b(0xe, uint16_t(p + i)));
+            std::vector<uint8_t> g;
+            for (int i = 0; i < (spell ? 6 : 8); i++) g.push_back(rom_.b(0xe, uint16_t(p + i)));
+            this->spell(g);
             break;
         }
         case 0x1e: {                     // name of the item in wCE94 (chests, shops), trailing blanks cut
@@ -232,7 +245,9 @@ void TextBox::step() {
             const uint16_t p = spell ? uint16_t(0x6d9b + itemArg * 6) : uint16_t(0x6ebb + (itemArg - 0x30) * 8);
             int n = spell ? 6 : 8;
             while (n > 0 && rom_.b(0xe, uint16_t(p + n - 1)) == 0xff) n--;
-            for (int i = 0; i < n; i++) putGlyph(rom_.b(0xe, uint16_t(p + i)));
+            std::vector<uint8_t> g;
+            for (int i = 0; i < n; i++) g.push_back(rom_.b(0xe, uint16_t(p + i)));
+            this->spell(g);
             break;
         }
         default:
@@ -286,6 +301,7 @@ void TextBox::tick(bool aPressed, bool aHeld, bool upPressed, bool downPressed) 
         if (waitEvent_ && mustWait && mustWait()) return;
         waitEvent_ = false;
         if (isBusy && isBusy()) return;
+        if (openWait_ > 0) { openWait_--; return; }
         if (delay_ > 0 && !aHeld) { delay_--; return; }
         step();
         if (delay_ <= 0) delay_ = kCharDelay;   // 00:3593: 1 + wCED9 (10) frames a character; A held skips the wait

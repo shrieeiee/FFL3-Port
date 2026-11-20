@@ -67,11 +67,12 @@ private:
     struct Src {                      // a byte source: ROM text, or an in-memory buffer
         int bank = 0; uint16_t addr = 0;
         std::vector<uint8_t> buf; size_t pos = 0;
-        bool isBuf = false, isCall = false;
+        bool isBuf = false, isCall = false, isRaw = false;
     };
     int next();                       // next byte from the source stack, -1 at end of buffers
     void runRef(uint8_t lo, uint8_t hi);
     void putGlyph(uint8_t t);
+    void spell(const std::vector<uint8_t>& glyphs);
     void newline();
     void clear();
     void finish();                    // end of the current text (return from a call or close)
@@ -84,6 +85,8 @@ private:
     int row_ = 0, col_ = 0;
     bool active_ = false;
     State state_ = State::Idle;
+    int openWait_ = 0;        // the window wiping open
+    static constexpr int kOpenWait = 18;
     int scrollWait_ = 0;      // 00:342C: a character's wait before the scroll
     int delay_ = 0, blink_ = 0, choice_ = 0;
     uint8_t choiceA_[2]{}, choiceB_[2]{};
